@@ -2818,6 +2818,17 @@ func (s *Server) listAuthorizedAccounts(principal *AuthPrincipal) ([]string, err
 		}
 	}
 
+	if len(allAccounts) == 0 {
+		if diskData, readErr := os.ReadFile(filepath.Join(configDir, "data", "accounts.json")); readErr == nil {
+			var diskWrapped struct {
+				Accounts []rpcAccountObj `json:"accounts"`
+			}
+			if json.Unmarshal(diskData, &diskWrapped) == nil {
+				allAccounts = extractAccounts(diskWrapped.Accounts)
+			}
+		}
+	}
+
 	filtered := make([]string, 0, len(allAccounts))
 	for _, acc := range allAccounts {
 		if principal == nil || principal.AllowsAccount(acc) {
