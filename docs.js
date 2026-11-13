@@ -95,7 +95,10 @@ function buildFieldInput(name, prop, isRequired) {
     group.appendChild(inputEl);
   } else {
     inputEl = document.createElement("input");
-    inputEl.type = "text";
+    inputEl.type = name === "admin_key" ? "password" : "text";
+    if (name === "admin_key") {
+      inputEl.autocomplete = "off";
+    }
     if (schemaType === "array") {
       const ex = Array.isArray(prop.example) ? prop.example.join(", ") : "";
       inputEl.placeholder = ex ? "comma-separated, e.g. " + ex : "comma-separated values";

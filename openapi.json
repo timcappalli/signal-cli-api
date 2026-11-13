@@ -20,6 +20,55 @@
     }
   ],
   "paths": {
+    "/api/auth/login": {
+      "post": {
+        "summary": "Create Admin Session",
+        "description": "Exchanges the root API_KEY_MGMT for a short-lived admin session token (3-minute hard TTL, 2-minute idle timeout).",
+        "operationId": "adminLogin",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["admin_key"],
+                "properties": {
+                  "admin_key": {
+                    "type": "string",
+                    "description": "Root administration key (API_KEY_MGMT)"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Admin session token issued"
+          },
+          "401": {
+            "description": "Invalid admin key"
+          },
+          "429": {
+            "description": "Too many failed login attempts"
+          }
+        }
+      }
+    },
+    "/api/auth/logout": {
+      "post": {
+        "summary": "Revoke Admin Session",
+        "description": "Invalidates the current admin session token and closes any WebSockets opened with it.",
+        "operationId": "adminLogout",
+        "security": [{"bearerAuth": []}],
+        "responses": {
+          "200": {
+            "description": "Session revoked"
+          }
+        }
+      }
+    },
     "/api/accounts/profile": {
       "post": {
         "summary": "Update Signal Account Profile",
