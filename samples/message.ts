@@ -4,6 +4,7 @@ import fs from "node:fs";
 import http from "node:http";
 import https from "node:https";
 import path from "node:path";
+import readline from "node:readline/promises";
 import type { Duplex } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
@@ -85,6 +86,7 @@ Options & Environment Variables:
   --destusername="<user.01>"  Destination Signal username (e.g. alice.01)
   --account="<account>"       Sender Signal account phone or UUID (optional if only 1 account or single-account key)
   --api-key="<sig_...>"       Scoped client API key with send+receive (or set SIGNAL_API_KEY)
+  --admin-key="<key>"         Optional admin API key (sig_...) or API_KEY_MGMT for resolving rate-limit challenges (or set SIGNAL_ADMIN_KEY)
   --url="<http://...>"        Signal API base URL (default: SIGNAL_API_URL or http://localhost:8080)
   --timeout="<seconds>"       Seconds to wait for a reply before exiting (default: 300)
   --help                      Show this help message
@@ -93,7 +95,7 @@ Options & Environment Variables:
 
 // Normalize arguments like `destphone="..."` (without leading `--`) so both `--destphone=...` and `destphone=...` work
 const normalizedArgv = process.argv.slice(2).map((arg) => {
-  if (!arg.startsWith("-") && /^(message|mesage|destphone|destusername|account|api-key|url|timeout)=/.test(arg)) {
+  if (!arg.startsWith("-") && /^(message|mesage|destphone|destusername|account|api-key|admin-key|url|timeout)=/.test(arg)) {
     return `--${arg}`;
   }
   return arg;
@@ -108,6 +110,7 @@ const { values } = parseArgs({
     destusername: { type: "string" },
     account: { type: "string", short: "a" },
     "api-key": { type: "string", short: "k" },
+    "admin-key": { type: "string" },
     url: { type: "string", short: "u" },
     timeout: { type: "string", short: "t" },
     help: { type: "boolean", short: "h" },
@@ -126,6 +129,7 @@ const destUsername = String(values.destusername ?? "").trim();
 const recipient = destPhone || destUsername;
 const account = String(values.account ?? process.env.SIGNAL_ACCOUNT ?? "").trim();
 const apiKey = String(values["api-key"] ?? process.env.SIGNAL_API_KEY ?? "").trim();
+const adminKey = String(values["admin-key"] ?? process.env.SIGNAL_ADMIN_KEY ?? "").trim();
 const baseUrl = String(values.url ?? process.env.SIGNAL_API_URL ?? "http://localhost:8080").replace(/\/+$/, "");
 const timeoutSec = Number.parseInt(String(values.timeout ?? "300"), 10) || 300;
 
@@ -141,7 +145,106 @@ if (!apiKey) {
   process.exit(1);
 }
 
-async function sendMessage(): Promise<{ timestamp?: number; recipientUuid?: string }> {
+interface RateLimitErrorBody {
+  error?: string;
+  challenge_token?: string;
+  retry_after_seconds?: number;
+}
+
+async function resolveAdminBearerToken(candidateKey: string): Promise<string> {
+  if (candidateKey.startsWith("sig_")) {
+    return candidateKey;
+  }
+  const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ admin_key: candidateKey }),
+  });
+  if (!loginRes.ok) {
+    const body = await loginRes.text();
+    throw new Error(`Admin login failed (${loginRes.status}): ${body}`);
+  }
+  const data = (await loginRes.json()) as { token?: string };
+  if (!data.token) {
+    throw new Error("Admin login succeeded but did not return a session token.");
+  }
+  return data.token;
+}
+
+async function submitRateLimitChallenge(challenge: string, captcha: string, keyForChallenge: string): Promise<boolean> {
+  const bearer = await resolveAdminBearerToken(keyForChallenge);
+  const payload: Record<string, string> = { challenge, captcha };
+  if (account) {
+    payload.account = account;
+  }
+
+  const res = await fetch(`${baseUrl}/v1/accounts/rate-limit-challenge`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${bearer}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (res.status === 401 || res.status === 403) {
+    return false;
+  }
+  const rawBody = await res.text();
+  if (!res.ok) {
+    throw new Error(`POST /v1/accounts/rate-limit-challenge failed (${res.status}): ${rawBody}`);
+  }
+  return true;
+}
+
+async function promptAndResolveRateLimitChallenge(errBody: RateLimitErrorBody): Promise<boolean> {
+  const challenge = errBody.challenge_token ?? "";
+  if (!challenge) {
+    return false;
+  }
+
+  console.warn("\nSignal returned a rate-limit challenge (429 Too Many Requests).");
+  if (errBody.retry_after_seconds) {
+    console.warn(`Cooldown without solving challenge: ${errBody.retry_after_seconds}s`);
+  }
+  console.warn(`Challenge token: ${challenge}`);
+  console.warn("Solve a CAPTCHA at https://signalcaptchas.org/challenge/generate.html");
+  console.warn("and copy the resulting signalcaptcha://... URL from the 'Open Signal' link.\n");
+
+  if (!process.stdin.isTTY) {
+    return false;
+  }
+
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    const captcha = (await rl.question("Paste signalcaptcha:// token (or press Enter to cancel): ")).trim();
+    if (!captcha) {
+      return false;
+    }
+
+    let candidateKey = adminKey || apiKey;
+    let submitted = await submitRateLimitChallenge(challenge, captcha, candidateKey);
+    if (!submitted) {
+      const enteredAdmin = (
+        await rl.question("Current key lacks admin permission. Enter admin API key (sig_...) or API_KEY_MGMT: ")
+      ).trim();
+      if (!enteredAdmin) {
+        return false;
+      }
+      submitted = await submitRateLimitChallenge(challenge, captcha, enteredAdmin);
+      if (!submitted) {
+        throw new Error("Provided key is not authorized to submit rate-limit challenges.");
+      }
+    }
+
+    console.log("Rate-limit challenge submitted. Retrying message send...");
+    return true;
+  } finally {
+    rl.close();
+  }
+}
+
+async function sendMessage(allowChallengeRetry = true): Promise<{ timestamp?: number; recipientUuid?: string }> {
   const payload: Record<string, unknown> = {
     recipients: [recipient],
     message: messageText,
@@ -160,6 +263,18 @@ async function sendMessage(): Promise<{ timestamp?: number; recipientUuid?: stri
   });
 
   const rawBody = await res.text();
+  if (res.status === 429 && allowChallengeRetry) {
+    let errBody: RateLimitErrorBody = {};
+    try {
+      errBody = JSON.parse(rawBody) as RateLimitErrorBody;
+    } catch {
+      // fall through to generic error
+    }
+    if (await promptAndResolveRateLimitChallenge(errBody)) {
+      return sendMessage(false);
+    }
+  }
+
   if (!res.ok) {
     throw new Error(`POST /v2/send failed (${res.status}): ${rawBody}`);
   }

@@ -3,7 +3,8 @@
 [`message.ts`](message.ts) is a zero-dependency Node.js / TypeScript CLI script (uses Node 22.6+ built-in TypeScript execution) that:
 1. Opens a WebSocket stream to `/v1/receive/<ACCOUNT>` using an `Authorization: Bearer <SIGNAL_API_KEY>` header (and automatically answers the server's 25-second RFC 6455 `Ping` frames with `Pong`).
 2. Sends a message to a target phone number (`--destphone`) or Signal username (`--destusername`) via `POST /v2/send`.
-3. Waits for the recipient's reply or emoji reaction, prints the structured JSON response, and exits cleanly.
+3. If Signal returns `429` with a `challenge_token`, prompts interactively for a solved `signalcaptcha://...` token, submits it via `POST /v1/accounts/rate-limit-challenge`, and retries sending.
+4. Waits for the recipient's reply or emoji reaction, prints the structured JSON response, and exits cleanly.
 
 ## Prerequisites
 

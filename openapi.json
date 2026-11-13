@@ -263,6 +263,59 @@
         }
       }
     },
+    "/v1/accounts/rate-limit-challenge": {
+      "post": {
+        "summary": "Submit Rate-Limit Challenge",
+        "description": "Submits a solved Signal CAPTCHA token (`signalcaptcha://...` from https://signalcaptchas.org/challenge/generate.html) for a `challenge` token returned by an upstream `RATE_LIMIT_FAILURE` (429) error. Requires an admin session token or an API key with `admin` permission.",
+        "operationId": "submitRateLimitChallenge",
+        "security": [{"bearerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["challenge", "captcha"],
+                "properties": {
+                  "account": {
+                    "type": "string",
+                    "description": "Account identifier (E.164 phone number or ACI UUID). Optional when only 1 account is registered or the key is scoped to a single account.",
+                    "example": "+15551234567"
+                  },
+                  "challenge": {
+                    "type": "string",
+                    "description": "Challenge token returned in `challenge_token` from a 429 rate-limit response",
+                    "example": "d887e9b0-8415-471a-a0f4-ab6a7c4a2e1d"
+                  },
+                  "captcha": {
+                    "type": "string",
+                    "description": "Solved Signal CAPTCHA token (`signalcaptcha://...`)",
+                    "example": "signalcaptcha://hcaptcha...."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Rate-limit challenge submitted"
+          },
+          "400": {
+            "description": "Missing or invalid account, challenge, or captcha token"
+          },
+          "401": {
+            "description": "Unauthorized (admin session or admin API key required)"
+          },
+          "403": {
+            "description": "Forbidden (key lacks admin permission for account)"
+          },
+          "502": {
+            "description": "Upstream signal-cli daemon error"
+          }
+        }
+      }
+    },
     "/v1/groups": {
       "get": {
         "summary": "List Groups (Default Account)",
@@ -532,6 +585,12 @@
         "responses": {
           "201": {
             "description": "Message sent successfully"
+          },
+          "429": {
+            "description": "Rate limited (either local send limiter or upstream Signal rate limit with `Retry-After`, `retry_after_seconds`, and `challenge_token` when a CAPTCHA challenge is required)"
+          },
+          "502": {
+            "description": "Upstream signal-cli daemon error"
           }
         }
       }

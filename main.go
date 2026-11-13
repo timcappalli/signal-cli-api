@@ -1619,8 +1619,19 @@ type JSONRPCResponse struct {
 }
 
 type JSONRPCError struct {
-	Code    int    `json:"code"`
-	Message string `json:"message"`
+	Code    int             `json:"code"`
+	Message string          `json:"message"`
+	Data    json.RawMessage `json:"data,omitempty"`
+}
+
+func (e *JSONRPCError) Error() string {
+	if e == nil {
+		return ""
+	}
+	if len(e.Data) > 0 {
+		return fmt.Sprintf("rpc error %d: %s (data: %s)", e.Code, e.Message, string(e.Data))
+	}
+	return fmt.Sprintf("rpc error %d: %s", e.Code, e.Message)
 }
 
 type SignalDaemon struct {
@@ -1834,7 +1845,7 @@ func (s *SignalDaemon) call(method string, params interface{}) (json.RawMessage,
 	select {
 	case resp := <-ch:
 		if resp.Error != nil {
-			return nil, fmt.Errorf("rpc error %d: %s", resp.Error.Code, resp.Error.Message)
+			return nil, resp.Error
 		}
 		return resp.Result, nil
 	case <-time.After(15 * time.Second):
@@ -2377,6 +2388,128 @@ func writeJSONError(w http.ResponseWriter, status int, msg string) {
 	_ = json.NewEncoder(w).Encode(map[string]string{"error": msg})
 }
 
+type rpcRateLimitResult struct {
+	Type              string `json:"type"`
+	Token             string `json:"token"`
+	RetryAfterSeconds int    `json:"retryAfterSeconds"`
+	RecipientAddress  struct {
+		UUID     *string `json:"uuid"`
+		Number   *string `json:"number"`
+		Username *string `json:"username"`
+	} `json:"recipientAddress"`
+}
+
+type rateLimitDetail struct {
+	Recipient         string `json:"recipient,omitempty"`
+	Type              string `json:"type"`
+	Token             string `json:"token,omitempty"`
+	RetryAfterSeconds int    `json:"retry_after_seconds,omitempty"`
+}
+
+func sanitizeRPCMessage(msg string) string {
+	msg = strings.TrimSpace(msg)
+	if msg == "" {
+		return "unknown signal-cli error"
+	}
+	if strings.Contains(msg, configDir) || strings.Contains(msg, "/tmp/") {
+		return "upstream signal-cli error"
+	}
+	return msg
+}
+
+func extractRateLimitDetails(data json.RawMessage) (results []rateLimitDetail, challengeToken string, maxRetryAfter int) {
+	if len(data) == 0 {
+		return nil, "", 0
+	}
+	var payload struct {
+		Response struct {
+			Results []rpcRateLimitResult `json:"results"`
+		} `json:"response"`
+	}
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return nil, "", 0
+	}
+	for _, r := range payload.Response.Results {
+		rcpt := ""
+		switch {
+		case r.RecipientAddress.Number != nil && *r.RecipientAddress.Number != "":
+			rcpt = *r.RecipientAddress.Number
+		case r.RecipientAddress.Username != nil && *r.RecipientAddress.Username != "":
+			rcpt = *r.RecipientAddress.Username
+		case r.RecipientAddress.UUID != nil && *r.RecipientAddress.UUID != "":
+			rcpt = *r.RecipientAddress.UUID
+		}
+		if r.Token != "" && challengeToken == "" {
+			challengeToken = r.Token
+		}
+		if r.RetryAfterSeconds > maxRetryAfter {
+			maxRetryAfter = r.RetryAfterSeconds
+		}
+		results = append(results, rateLimitDetail{
+			Recipient:         rcpt,
+			Type:              r.Type,
+			Token:             r.Token,
+			RetryAfterSeconds: r.RetryAfterSeconds,
+		})
+	}
+	return results, challengeToken, maxRetryAfter
+}
+
+func writeDaemonRPCError(w http.ResponseWriter, fallbackMsg string, err error, nonRateLimitStatus int) {
+	var rpcErr *JSONRPCError
+	if !errors.As(err, &rpcErr) {
+		writeJSONError(w, http.StatusBadGateway, fallbackMsg)
+		return
+	}
+
+	details, challengeToken, retryAfter := extractRateLimitDetails(rpcErr.Data)
+	isRateLimit := rpcErr.Code == -5 || strings.Contains(strings.ToLower(rpcErr.Message), "rate limit")
+	for _, d := range details {
+		if d.Type == "RATE_LIMIT_FAILURE" {
+			isRateLimit = true
+			break
+		}
+	}
+
+	msg := sanitizeRPCMessage(rpcErr.Message)
+	resp := map[string]interface{}{
+		"rpc_code": rpcErr.Code,
+	}
+
+	status := nonRateLimitStatus
+	if status == 0 {
+		status = http.StatusBadGateway
+	}
+
+	if isRateLimit {
+		status = http.StatusTooManyRequests
+		if retryAfter > 0 {
+			w.Header().Set("Retry-After", fmt.Sprintf("%d", retryAfter))
+			resp["retry_after_seconds"] = retryAfter
+		}
+		if challengeToken != "" {
+			resp["challenge_token"] = challengeToken
+			msg = fmt.Sprintf("%s (submit challenge token via POST /v1/accounts/rate-limit-challenge)", msg)
+		}
+		if len(details) > 0 {
+			resp["details"] = details
+		}
+		resp["error"] = msg
+	} else {
+		resp["error"] = fmt.Sprintf("%s: %s", fallbackMsg, msg)
+		if len(rpcErr.Data) > 0 && !strings.Contains(string(rpcErr.Data), configDir) && !strings.Contains(string(rpcErr.Data), "/tmp/") {
+			var parsed interface{}
+			if json.Unmarshal(rpcErr.Data, &parsed) == nil {
+				resp["details"] = parsed
+			}
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
 func requireJSON(w http.ResponseWriter, r *http.Request) bool {
 	if !isJSONContentType(r) {
 		writeJSONError(w, http.StatusUnsupportedMediaType, "Unsupported Media Type: Content-Type must be application/json")
@@ -2575,8 +2708,8 @@ func (s *Server) adminAuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 
-		// Also allow a client API key explicitly granted "admin" permission for /api/accounts/profile or /v1/profiles
-		if (r.URL.Path == "/api/accounts/profile" || r.URL.Path == "/v1/profiles" || strings.HasPrefix(r.URL.Path, "/v1/profiles/")) && s.keyStore != nil && token != "" {
+		// Also allow a client API key explicitly granted "admin" permission for profile and rate-limit challenge endpoints
+		if (r.URL.Path == "/api/accounts/profile" || r.URL.Path == "/v1/profiles" || strings.HasPrefix(r.URL.Path, "/v1/profiles/") || r.URL.Path == "/v1/accounts/rate-limit-challenge") && s.keyStore != nil && token != "" {
 			if k, ok := s.keyStore.LookupKey(token); ok && k.HasPermission(PermAdmin) {
 				p := &AuthPrincipal{
 					IsRoot:      false,
@@ -2924,7 +3057,7 @@ func (s *Server) handleGroups(w http.ResponseWriter, r *http.Request) {
 	result, err := s.daemon.call("listGroups", params)
 	if err != nil {
 		log.Printf("[server] listGroups failed: %v", err)
-		writeJSONError(w, http.StatusBadGateway, "Failed to retrieve groups from signal-cli daemon")
+		writeDaemonRPCError(w, "Failed to retrieve groups from signal-cli daemon", err, http.StatusBadGateway)
 		return
 	}
 
@@ -2992,7 +3125,7 @@ func (s *Server) handleReactions(w http.ResponseWriter, r *http.Request) {
 
 	if _, err := s.daemon.call("sendReaction", params); err != nil {
 		log.Printf("[server] Failed to send reaction: %v", err)
-		writeJSONError(w, http.StatusBadGateway, "Failed to send reaction via signal-cli daemon")
+		writeDaemonRPCError(w, "Failed to send reaction via signal-cli daemon", err, http.StatusBadGateway)
 		return
 	}
 
@@ -3078,7 +3211,7 @@ func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 	res, err := s.daemon.call("send", params)
 	if err != nil {
 		log.Printf("[server] Failed to send message: %v", err)
-		writeJSONError(w, http.StatusBadGateway, "Failed to send message via signal-cli daemon")
+		writeDaemonRPCError(w, "Failed to send message via signal-cli daemon", err, http.StatusBadGateway)
 		return
 	}
 
@@ -3273,13 +3406,82 @@ func (s *Server) handleUpdateProfile(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		log.Printf("[server] Failed to update profile for %q: %v", account, err)
-		writeJSONError(w, http.StatusBadGateway, "Failed to update account profile via signal-cli daemon")
+		writeDaemonRPCError(w, "Failed to update account profile via signal-cli daemon", err, http.StatusBadGateway)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{
 		"status":  "profile_updated",
+		"account": account,
+	})
+}
+
+type RateLimitChallengeRequest struct {
+	Account   string `json:"account"`
+	Challenge string `json:"challenge"`
+	Captcha   string `json:"captcha"`
+}
+
+func isValidChallengeToken(val string) bool {
+	if val == "" || len(val) > 4096 || strings.HasPrefix(val, "-") {
+		return false
+	}
+	for _, r := range val {
+		if r < 0x20 || r == 0x7f {
+			return false
+		}
+	}
+	return true
+}
+
+func (s *Server) handleRateLimitChallenge(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSONError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+	if !requireJSON(w, r) {
+		return
+	}
+
+	var req RateLimitChallengeRequest
+	if !decodeLimitedJSON(w, r, maxRequestBodyBytes, &req) {
+		return
+	}
+
+	principal := getPrincipal(r)
+	account, err := s.resolveAccount(req.Account, principal)
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, "Missing or invalid account identifier")
+		return
+	}
+
+	if !principal.HasPermission(PermAdmin) || !principal.AllowsAccount(account) {
+		writeJSONError(w, http.StatusForbidden, "Forbidden: admin permission for this account is required to submit rate-limit challenges.")
+		return
+	}
+
+	challenge := strings.TrimSpace(req.Challenge)
+	captcha := strings.TrimSpace(req.Captcha)
+	if !isValidChallengeToken(challenge) || !isValidChallengeToken(captcha) {
+		writeJSONError(w, http.StatusBadRequest, "Valid challenge and captcha tokens are required")
+		return
+	}
+
+	params := map[string]interface{}{
+		"account":   account,
+		"challenge": challenge,
+		"captcha":   captcha,
+	}
+	if _, err := s.daemon.call("submitRateLimitChallenge", params); err != nil {
+		log.Printf("[server] Failed to submit rate-limit challenge for %q: %v", account, err)
+		writeDaemonRPCError(w, "Failed to submit rate-limit challenge via signal-cli daemon", err, http.StatusBadGateway)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]string{
+		"status":  "challenge_submitted",
 		"account": account,
 	})
 }
@@ -3362,6 +3564,7 @@ func (s *Server) Handler() http.Handler {
 
 	// Admin Endpoints: Account Profile & API Key Management (Requires valid 3-minute session token)
 	mux.HandleFunc("/api/accounts/profile", s.adminAuthMiddleware(s.handleUpdateProfile))
+	mux.HandleFunc("/v1/accounts/rate-limit-challenge", s.adminAuthMiddleware(s.handleRateLimitChallenge))
 	mux.HandleFunc("/v1/profiles", s.adminAuthMiddleware(s.handleUpdateProfile))
 	mux.HandleFunc("/v1/profiles/", s.adminAuthMiddleware(s.handleUpdateProfile))
 	mux.HandleFunc("/api/keys", s.adminAuthMiddleware(s.handleListOrAddKeys))

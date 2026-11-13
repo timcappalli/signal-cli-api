@@ -8,5 +8,8 @@
   },
   "scripts": {
     "message": "node message.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6"
   }
 }

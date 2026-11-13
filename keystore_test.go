@@ -1788,6 +1788,173 @@ func strconvFormatInt(n int64) string {
 	return string(b)
 }
 
+func TestRateLimitErrorSurfacingAndChallengeSubmission(t *testing.T) {
+	tmpDir := t.TempDir()
+	ks, err := newKeyStore(filepath.Join(tmpDir, "api_keys.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	const acctUUID = "11111111-2222-3333-4444-555555555555"
+	sendKey, err := ks.CreateKey("Sender", []string{acctUUID}, []string{"send"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	adminKey, err := ks.CreateKey("Admin", []string{acctUUID}, []string{"admin"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	hub := newWSHub()
+	go hub.run()
+	daemon := newSignalDaemon(hub)
+	clientConn, daemonConn := net.Pipe()
+	defer clientConn.Close()
+	defer daemonConn.Close()
+
+	daemon.mu.Lock()
+	daemon.conn = clientConn
+	daemon.mu.Unlock()
+	go daemon.readLoop(clientConn)
+
+	var mu sync.Mutex
+	var nextSendError string
+	var capturedMethod, capturedAccount, capturedChallenge, capturedCaptcha string
+
+	go func() {
+		scanner := bufio.NewScanner(daemonConn)
+		for scanner.Scan() {
+			var req struct {
+				Method string                 `json:"method"`
+				Params map[string]interface{} `json:"params"`
+				ID     int64                  `json:"id"`
+			}
+			if err := json.Unmarshal(scanner.Bytes(), &req); err != nil {
+				continue
+			}
+
+			mu.Lock()
+			sendErr := nextSendError
+			if req.Method == "submitRateLimitChallenge" {
+				capturedMethod = req.Method
+				capturedAccount, _ = req.Params["account"].(string)
+				capturedChallenge, _ = req.Params["challenge"].(string)
+				capturedCaptcha, _ = req.Params["captcha"].(string)
+			}
+			mu.Unlock()
+
+			var resp string
+			switch {
+			case req.Method == "send" && sendErr != "":
+				resp = `{"jsonrpc":"2.0","error":` + sendErr + `,"id":` + strconvFormatInt(req.ID) + `}` + "\n"
+			default:
+				resp = `{"jsonrpc":"2.0","result":{},"id":` + strconvFormatInt(req.ID) + `}` + "\n"
+			}
+			_, _ = daemonConn.Write([]byte(resp))
+		}
+	}()
+
+	srv := &Server{
+		daemon:       daemon,
+		hub:          hub,
+		keyStore:     ks,
+		sessionStore: newSessionStore(time.Minute),
+		apiKeyMgmt:   testRootKey,
+	}
+	handler := srv.Handler()
+
+	// 1. Upstream Signal RATE_LIMIT_FAILURE maps to 429 with Retry-After, challenge_token, and details
+	mu.Lock()
+	nextSendError = `{"code":-5,"message":"Failed to send message due to rate limiting","data":{"response":{"results":[{"recipientAddress":{"uuid":null,"number":"+16179496228","username":null},"type":"RATE_LIMIT_FAILURE","token":"d887e9b0-8415-471a-a0f4-ab6a7c4a2e1d","retryAfterSeconds":86400}],"timestamp":1794584710283}}}`
+	mu.Unlock()
+
+	sendReq := httptest.NewRequest(http.MethodPost, "http://localhost:8080/v2/send",
+		strings.NewReader(`{"account":"`+acctUUID+`","recipients":["+16179496228"],"message":"hello"}`))
+	sendReq.Header.Set("Authorization", "Bearer "+sendKey.Key)
+	sendReq.Header.Set("Content-Type", "application/json")
+	sendRec := httptest.NewRecorder()
+	handler.ServeHTTP(sendRec, sendReq)
+
+	if sendRec.Code != http.StatusTooManyRequests {
+		t.Fatalf("Expected 429 for upstream rate limit, got %d (%s)", sendRec.Code, sendRec.Body.String())
+	}
+	if got := sendRec.Header().Get("Retry-After"); got != "86400" {
+		t.Errorf("Expected Retry-After: 86400, got %q", got)
+	}
+	var rlBody map[string]interface{}
+	if err := json.Unmarshal(sendRec.Body.Bytes(), &rlBody); err != nil {
+		t.Fatalf("Invalid JSON in 429 body: %v", err)
+	}
+	if rlBody["challenge_token"] != "d887e9b0-8415-471a-a0f4-ab6a7c4a2e1d" {
+		t.Errorf("Expected challenge_token in 429 body, got %v", rlBody["challenge_token"])
+	}
+	if rlBody["retry_after_seconds"] != float64(86400) {
+		t.Errorf("Expected retry_after_seconds=86400, got %v", rlBody["retry_after_seconds"])
+	}
+	if errStr, _ := rlBody["error"].(string); !strings.Contains(errStr, "rate limiting") {
+		t.Errorf("Expected rate limiting message in error field, got %q", errStr)
+	}
+
+	// 2. Non-rate-limit JSON-RPC error surfaces upstream message on 502
+	mu.Lock()
+	nextSendError = `{"code":-1,"message":"Unregistered user"}`
+	mu.Unlock()
+
+	errReq := httptest.NewRequest(http.MethodPost, "http://localhost:8080/v2/send",
+		strings.NewReader(`{"account":"`+acctUUID+`","recipients":["+16179496228"],"message":"hello"}`))
+	errReq.Header.Set("Authorization", "Bearer "+sendKey.Key)
+	errReq.Header.Set("Content-Type", "application/json")
+	errRec := httptest.NewRecorder()
+	handler.ServeHTTP(errRec, errReq)
+
+	if errRec.Code != http.StatusBadGateway {
+		t.Fatalf("Expected 502 for non-rate-limit RPC error, got %d (%s)", errRec.Code, errRec.Body.String())
+	}
+	if !strings.Contains(errRec.Body.String(), "Unregistered user") {
+		t.Errorf("Expected upstream RPC error message in 502 body, got %s", errRec.Body.String())
+	}
+
+	// 3. Non-admin key cannot submit rate-limit challenge
+	nonAdminChallengeReq := httptest.NewRequest(http.MethodPost, "http://localhost:8080/v1/accounts/rate-limit-challenge",
+		strings.NewReader(`{"account":"`+acctUUID+`","challenge":"d887e9b0-8415-471a-a0f4-ab6a7c4a2e1d","captcha":"signalcaptcha://tok"}`))
+	nonAdminChallengeReq.Header.Set("Authorization", "Bearer "+sendKey.Key)
+	nonAdminChallengeReq.Header.Set("Content-Type", "application/json")
+	nonAdminChallengeRec := httptest.NewRecorder()
+	handler.ServeHTTP(nonAdminChallengeRec, nonAdminChallengeReq)
+	if nonAdminChallengeRec.Code != http.StatusUnauthorized {
+		t.Errorf("Expected 401 for non-admin key on /v1/accounts/rate-limit-challenge, got %d", nonAdminChallengeRec.Code)
+	}
+
+	// 4. Missing challenge/captcha returns 400
+	badChallengeReq := httptest.NewRequest(http.MethodPost, "http://localhost:8080/v1/accounts/rate-limit-challenge",
+		strings.NewReader(`{"account":"`+acctUUID+`","challenge":"","captcha":"signalcaptcha://tok"}`))
+	badChallengeReq.Header.Set("Authorization", "Bearer "+adminKey.Key)
+	badChallengeReq.Header.Set("Content-Type", "application/json")
+	badChallengeRec := httptest.NewRecorder()
+	handler.ServeHTTP(badChallengeRec, badChallengeReq)
+	if badChallengeRec.Code != http.StatusBadRequest {
+		t.Errorf("Expected 400 for empty challenge, got %d", badChallengeRec.Code)
+	}
+
+	// 5. Valid admin key submits submitRateLimitChallenge with auto-resolved single-account UUID
+	okChallengeReq := httptest.NewRequest(http.MethodPost, "http://localhost:8080/v1/accounts/rate-limit-challenge",
+		strings.NewReader(`{"challenge":"d887e9b0-8415-471a-a0f4-ab6a7c4a2e1d","captcha":"signalcaptcha://solved-token"}`))
+	okChallengeReq.Header.Set("Authorization", "Bearer "+adminKey.Key)
+	okChallengeReq.Header.Set("Content-Type", "application/json")
+	okChallengeRec := httptest.NewRecorder()
+	handler.ServeHTTP(okChallengeRec, okChallengeReq)
+	if okChallengeRec.Code != http.StatusOK {
+		t.Fatalf("Expected 200 from /v1/accounts/rate-limit-challenge, got %d (%s)", okChallengeRec.Code, okChallengeRec.Body.String())
+	}
+
+	mu.Lock()
+	if capturedMethod != "submitRateLimitChallenge" || capturedAccount != acctUUID ||
+		capturedChallenge != "d887e9b0-8415-471a-a0f4-ab6a7c4a2e1d" || capturedCaptcha != "signalcaptcha://solved-token" {
+		t.Errorf("Unexpected RPC params: method=%q account=%q challenge=%q captcha=%q",
+			capturedMethod, capturedAccount, capturedChallenge, capturedCaptcha)
+	}
+	mu.Unlock()
+}
+
 
 
 
