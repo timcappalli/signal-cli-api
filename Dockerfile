@@ -25,7 +25,11 @@ RUN apk add --no-cache \
     adduser -u 10001 -S -G signalapi -h /home/.local/share/signal-cli -s /sbin/nologin signalapi && \
     mkdir -p /app /home/.local/share/signal-cli && \
     chmod 700 /home/.local/share/signal-cli && \
-    chown -R 10001:10001 /app /home/.local/share/signal-cli
+    chown -R 10001:10001 /app /home/.local/share/signal-cli && \
+    SQLITE_JAR=$(find /usr -name 'sqlite-jdbc-*.jar' | head -n1) && \
+    unzip -p "$SQLITE_JAR" "org/sqlite/native/Linux-Musl/$(uname -m)/libsqlitejdbc.so" > /usr/lib/libsqlitejdbc.so && \
+    test -s /usr/lib/libsqlitejdbc.so && \
+    chmod 755 /usr/lib/libsqlitejdbc.so
 
 WORKDIR /app
 
@@ -39,7 +43,8 @@ COPY --chown=10001:10001 admin.js /app/admin.js
 
 ENV PORT=8080 \
     HOME=/home/.local/share/signal-cli \
-    XDG_DATA_HOME=/home/.local/share
+    XDG_DATA_HOME=/home/.local/share \
+    SIGNAL_CLI_OPTS="-Dorg.sqlite.lib.path=/usr/lib"
 
 RUN printf '#!/bin/sh\nexec /app/signal-api register-recovery "$@"\n' > /usr/local/bin/register-recovery && \
     chmod 755 /usr/local/bin/register-recovery
@@ -53,5 +58,5 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
 
 ENTRYPOINT ["/app/signal-api"]
 
-LABEL org.opencontainers.image.source https://github.com/timcappalli/signal-cli-api
-LABEL org.opencontainers.image.version "1.0.1"
+LABEL org.opencontainers.image.source="https://github.com/timcappalli/signal-cli-api"
+LABEL org.opencontainers.image.version="1.0.2"
