@@ -789,6 +789,21 @@ func TestBuildRegisterRPCRequestFromStdin(t *testing.T) {
 	if err := parseRegisterRPCResponse(strings.NewReader(`{"jsonrpc":"2.0","result":{},"id":1}` + "\n")); err != nil {
 		t.Errorf("Expected matching ID=1 success response to return nil, got: %v", err)
 	}
+
+	// Verify CLI fallback flag builder
+	cliArgs, err := buildRegisterCLIFlags("B2E90D33-418B-45A0-8C41-CB2D55E05CA4", rk, []string{"--reregister"})
+	if err != nil {
+		t.Fatalf("buildRegisterCLIFlags failed: %v", err)
+	}
+	expectedPrefix := []string{"--config", configDir, "-a", "B2E90D33-418B-45A0-8C41-CB2D55E05CA4", "register", "--recovery-key", rk, "--reregister"}
+	if len(cliArgs) != len(expectedPrefix) {
+		t.Fatalf("Unexpected cliArgs length: got %v, want %v", cliArgs, expectedPrefix)
+	}
+	for i := range expectedPrefix {
+		if cliArgs[i] != expectedPrefix[i] {
+			t.Errorf("cliArgs[%d] = %q, want %q", i, cliArgs[i], expectedPrefix[i])
+		}
+	}
 }
 
 func TestWebSocketConnectionLimitsAndPongLiveness(t *testing.T) {

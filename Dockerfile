@@ -38,7 +38,11 @@ COPY --chown=10001:10001 admin.html /app/admin.html
 COPY --chown=10001:10001 admin.js /app/admin.js
 
 ENV PORT=8080 \
-    HOME=/home/.local/share/signal-cli
+    HOME=/home/.local/share/signal-cli \
+    XDG_DATA_HOME=/home/.local/share
+
+RUN printf '#!/bin/sh\nexec /app/signal-api register-recovery "$@"\n' > /usr/local/bin/register-recovery && \
+    chmod 755 /usr/local/bin/register-recovery
 
 USER 10001:10001
 
@@ -50,3 +54,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
 ENTRYPOINT ["/app/signal-api"]
 
 LABEL org.opencontainers.image.source https://github.com/timcappalli/signal-cli-api
+LABEL org.opencontainers.image.version "1.0.1"

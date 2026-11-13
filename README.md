@@ -144,7 +144,9 @@ curl -X DELETE http://localhost:8080/api/keys/<KEY_ID> \
 
 Account credentials and recovery keys are kept out of environment variables. Use the provided [`register.sh`](register.sh) helper to manage accounts:
 
-### Option A: Register a Numberless Account via Recovery Key (Recommended)
+### Option A: Register / Recover a Numberless Account via Recovery Key (Recommended)
+
+From the Docker host using [`register.sh`](register.sh):
 ```bash
 # Prompts securely (never pass the recovery key as a CLI argument, which exposes it in ps and shell history):
 ./register.sh recovery "<ACCOUNT_ID>"
@@ -152,6 +154,12 @@ Account credentials and recovery keys are kept out of environment variables. Use
 # Or pipe via stdin:
 printf '%s\n' "$RECOVERY_KEY" | ./register.sh recovery "<ACCOUNT_ID>"
 ```
+
+Or directly inside the container shell (connected as user `10001`):
+```sh
+register-recovery "<ACCOUNT_ID>"
+```
+*(If this is the first time initializing that account in this container's volume, restart the container afterward with `docker restart signal-api` so the daemon loads the newly added account.)*
 
 ### Option B: Link a Secondary Device via QR Code
 ```bash

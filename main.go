@@ -1832,6 +1832,62 @@ func (s *SignalDaemon) call(method string, params interface{}) (json.RawMessage,
 	}
 }
 
+func readRecoveryKey(account string, r io.Reader) (string, error) {
+	if f, ok := r.(*os.File); ok {
+		if info, err := f.Stat(); err == nil && (info.Mode()&os.ModeCharDevice) != 0 {
+			fmt.Fprintf(os.Stderr, "Enter Recovery Key for account %q: ", account)
+			line, err := bufio.NewReader(f).ReadString('\n')
+			if err != nil && !errors.Is(err, io.EOF) {
+				return "", fmt.Errorf("failed to read recovery key from stdin: %w", err)
+			}
+			key := strings.TrimSpace(line)
+			if key == "" {
+				return "", errors.New("recovery key read from stdin cannot be empty")
+			}
+			return key, nil
+		}
+	}
+	rawKey, err := io.ReadAll(io.LimitReader(r, 4096))
+	if err != nil {
+		return "", fmt.Errorf("failed to read recovery key from stdin: %w", err)
+	}
+	key := strings.TrimSpace(string(rawKey))
+	if key == "" {
+		return "", errors.New("recovery key read from stdin cannot be empty")
+	}
+	return key, nil
+}
+
+func buildRegisterCLIFlags(account, recoveryKey string, extraFlags []string) ([]string, error) {
+	account = strings.TrimSpace(account)
+	if account == "" || strings.HasPrefix(account, "-") {
+		return nil, errors.New("valid account identifier is required")
+	}
+	recoveryKey = strings.TrimSpace(recoveryKey)
+	if recoveryKey == "" {
+		return nil, errors.New("recovery key cannot be empty")
+	}
+	args := []string{"--config", configDir, "-a", account, "register", "--recovery-key", recoveryKey}
+	for i := 0; i < len(extraFlags); i++ {
+		arg := extraFlags[i]
+		switch {
+		case arg == "--reregister", arg == "--voice":
+			args = append(args, arg)
+		case arg == "--captcha":
+			if i+1 >= len(extraFlags) {
+				return nil, errors.New("--captcha requires a value")
+			}
+			i++
+			args = append(args, "--captcha", extraFlags[i])
+		case strings.HasPrefix(arg, "--captcha="):
+			args = append(args, arg)
+		default:
+			return nil, fmt.Errorf("unsupported flag %q for register-recovery", arg)
+		}
+	}
+	return args, nil
+}
+
 // buildRegisterRPCRequest reads a recovery key from r (stdin) and builds a signal-cli JSON-RPC
 // "register" request so the recovery key never appears in process arguments (argv / ps).
 func buildRegisterRPCRequest(account string, r io.Reader, extraFlags []string) ([]byte, error) {
@@ -1843,15 +1899,14 @@ func buildRegisterRPCRequest(account string, r io.Reader, extraFlags []string) (
 		return nil, errors.New("stdin reader is required")
 	}
 
-	rawKey, err := io.ReadAll(io.LimitReader(r, 4096))
+	recoveryKey, err := readRecoveryKey(account, r)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read recovery key from stdin: %w", err)
+		return nil, err
 	}
-	recoveryKey := strings.TrimSpace(string(rawKey))
-	if recoveryKey == "" {
-		return nil, errors.New("recovery key read from stdin cannot be empty")
-	}
+	return buildRegisterRPCRequestFromKey(account, recoveryKey, extraFlags)
+}
 
+func buildRegisterRPCRequestFromKey(account, recoveryKey string, extraFlags []string) ([]byte, error) {
 	params := map[string]interface{}{
 		"account":     account,
 		"recoveryKey": recoveryKey,
@@ -1918,10 +1973,22 @@ func parseRegisterRPCResponse(r io.Reader) error {
 }
 
 // runRegisterRecovery sends the JSON-RPC register request over the local daemon TCP socket
-// (or via `signal-cli jsonRpc` stdin if the daemon is not reachable), keeping the recovery key
-// completely out of container process argv.
+// (or via `signal-cli jsonRpc` stdin if the daemon is not reachable), falling back to the direct
+// `signal-cli register --recovery-key` CLI when the account does not yet exist in accounts.json.
 func runRegisterRecovery(account string, r io.Reader, extraFlags []string) error {
-	reqBytes, err := buildRegisterRPCRequest(account, r, extraFlags)
+	account = strings.TrimSpace(account)
+	if account == "" || strings.HasPrefix(account, "-") {
+		return errors.New("valid account identifier is required")
+	}
+	if r == nil {
+		return errors.New("stdin reader is required")
+	}
+
+	recoveryKey, err := readRecoveryKey(account, r)
+	if err != nil {
+		return err
+	}
+	reqBytes, err := buildRegisterRPCRequestFromKey(account, recoveryKey, extraFlags)
 	if err != nil {
 		return err
 	}
@@ -1931,21 +1998,32 @@ func runRegisterRecovery(account string, r io.Reader, extraFlags []string) error
 		_ = conn.SetDeadline(time.Now().Add(30 * time.Second))
 		if _, err := conn.Write(reqBytes); err == nil {
 			rpcErr := parseRegisterRPCResponse(conn)
-			if rpcErr == nil || strings.HasPrefix(rpcErr.Error(), "signal-cli rpc error") {
+			if rpcErr == nil {
+				return nil
+			}
+			if !strings.Contains(rpcErr.Error(), "Failed to load the given account") &&
+				strings.HasPrefix(rpcErr.Error(), "signal-cli rpc error") {
 				return rpcErr
 			}
 		}
 	}
 
+	cliArgs, err := buildRegisterCLIFlags(account, recoveryKey, extraFlags)
+	if err != nil {
+		return err
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "signal-cli", "--config", configDir, "jsonRpc")
-	cmd.Stdin = bytes.NewReader(reqBytes)
+	cmd := exec.CommandContext(ctx, "signal-cli", cliArgs...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("signal-cli jsonRpc failed: %w", err)
+		msg := strings.TrimSpace(string(out))
+		if msg != "" {
+			return fmt.Errorf("signal-cli register failed: %s", msg)
+		}
+		return fmt.Errorf("signal-cli register failed: %w", err)
 	}
-	return parseRegisterRPCResponse(bytes.NewReader(out))
+	return nil
 }
 
 // -----------------------------------------------------------------------------
