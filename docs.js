@@ -179,7 +179,15 @@ function buildTryPanel(spec, pathStr, method, op) {
   statusPill.className = "status-pill";
   const timingEl = document.createElement("span");
   timingEl.style.color = "var(--text-muted)";
-  respMeta.append(statusPill, timingEl);
+  const useTokenBtn = document.createElement("button");
+  useTokenBtn.type = "button";
+  useTokenBtn.className = "btn-secondary";
+  useTokenBtn.style.padding = "3px 8px";
+  useTokenBtn.style.fontSize = "11px";
+  useTokenBtn.style.marginLeft = "auto";
+  useTokenBtn.style.display = "none";
+  useTokenBtn.textContent = "Use token in Explorer";
+  respMeta.append(statusPill, timingEl, useTokenBtn);
 
   const respPre = document.createElement("pre");
   respBox.append(respMeta, respPre);
@@ -202,8 +210,10 @@ function buildTryPanel(spec, pathStr, method, op) {
 
     const headers = {};
     const requiresAuth = !(Array.isArray(op.security) && op.security.length === 0);
-    if (requiresAuth && explorerToken) {
-      headers["Authorization"] = "Bearer " + explorerToken;
+    const inputVal = (document.getElementById("apiKeyInput")?.value || "").trim();
+    const activeToken = inputVal || explorerToken;
+    if (requiresAuth && activeToken) {
+      headers["Authorization"] = "Bearer " + activeToken;
     }
 
     const fetchOpts = { method: method.toUpperCase(), headers };
@@ -270,12 +280,28 @@ function buildTryPanel(spec, pathStr, method, op) {
       const elapsed = Math.round(performance.now() - started);
       const text = await res.text();
       let formatted = text;
+      let parsedJson = null;
       if (text) {
         try {
-          formatted = JSON.stringify(JSON.parse(text), null, 2);
+          parsedJson = JSON.parse(text);
+          formatted = JSON.stringify(parsedJson, null, 2);
         } catch (_) {}
       } else {
         formatted = "(empty response body)";
+      }
+
+      if (res.ok && parsedJson && typeof parsedJson.token === "string" && parsedJson.token) {
+        const returnedToken = parsedJson.token;
+        useTokenBtn.style.display = "inline-block";
+        useTokenBtn.onclick = () => {
+          const input = document.getElementById("apiKeyInput");
+          if (input) input.value = returnedToken;
+          setExplorerToken(returnedToken);
+          useTokenBtn.textContent = "Applied!";
+          setTimeout(() => { useTokenBtn.textContent = "Use token in Explorer"; }, 1500);
+        };
+      } else {
+        useTokenBtn.style.display = "none";
       }
 
       statusPill.className = "status-pill " + (res.ok ? "status-ok" : "status-err");

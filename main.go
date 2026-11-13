@@ -2782,21 +2782,38 @@ func (s *Server) listAuthorizedAccounts(principal *AuthPrincipal) ([]string, err
 		return nil, err
 	}
 
+	type rpcAccountObj struct {
+		Number string `json:"number"`
+		UUID   string `json:"uuid"`
+		ACI    string `json:"aci"`
+	}
+	extractAccounts := func(items []rpcAccountObj) []string {
+		var out []string
+		for _, item := range items {
+			if item.Number != "" {
+				out = append(out, item.Number)
+			} else if item.UUID != "" {
+				out = append(out, item.UUID)
+			} else if item.ACI != "" {
+				out = append(out, item.ACI)
+			}
+		}
+		return out
+	}
+
 	var strSlice []string
 	if err := json.Unmarshal(result, &strSlice); err == nil {
 		allAccounts = strSlice
 	} else {
-		var objSlice []struct {
-			Number string `json:"number"`
-			UUID   string `json:"uuid"`
-		}
+		var objSlice []rpcAccountObj
 		if err := json.Unmarshal(result, &objSlice); err == nil {
-			for _, item := range objSlice {
-				if item.Number != "" {
-					allAccounts = append(allAccounts, item.Number)
-				} else if item.UUID != "" {
-					allAccounts = append(allAccounts, item.UUID)
-				}
+			allAccounts = extractAccounts(objSlice)
+		} else {
+			var wrapped struct {
+				Accounts []rpcAccountObj `json:"accounts"`
+			}
+			if err := json.Unmarshal(result, &wrapped); err == nil {
+				allAccounts = extractAccounts(wrapped.Accounts)
 			}
 		}
 	}
