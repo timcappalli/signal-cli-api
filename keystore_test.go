@@ -514,7 +514,23 @@ func TestAuthMiddlewareAllBranches(t *testing.T) {
 	}
 
 	// 4. Admin session login and logout revocation
+	// Verify /api/info requires admin auth and returns version
+	unauthInfoReq := httptest.NewRequest(http.MethodGet, "http://localhost:8080/api/info", nil)
+	unauthInfoRec := httptest.NewRecorder()
+	handler.ServeHTTP(unauthInfoRec, unauthInfoReq)
+	if unauthInfoRec.Code != http.StatusUnauthorized {
+		t.Errorf("Expected unauthenticated GET /api/info to return 401, got %d", unauthInfoRec.Code)
+	}
+
 	sessToken := createAdminSession(t, handler, testRootKey)
+
+	authInfoReq := httptest.NewRequest(http.MethodGet, "http://localhost:8080/api/info", nil)
+	authInfoReq.Header.Set("Authorization", "Bearer "+sessToken)
+	authInfoRec := httptest.NewRecorder()
+	handler.ServeHTTP(authInfoRec, authInfoReq)
+	if authInfoRec.Code != http.StatusOK || !strings.Contains(authInfoRec.Body.String(), `"version"`) {
+		t.Errorf("Expected authenticated GET /api/info to return 200 with version, got %d (%s)", authInfoRec.Code, authInfoRec.Body.String())
+	}
 	req = httptest.NewRequest(http.MethodGet, "http://localhost:8080/api/keys", nil)
 	req.Header.Set("Authorization", "Bearer "+sessToken)
 	rec = httptest.NewRecorder()
@@ -658,7 +674,23 @@ func TestErrorSanitizationAndDaemonStopRace(t *testing.T) {
 		},
 	}
 	handler := srv.Handler()
+	// Verify /api/info requires admin auth and returns version
+	unauthInfoReq := httptest.NewRequest(http.MethodGet, "http://localhost:8080/api/info", nil)
+	unauthInfoRec := httptest.NewRecorder()
+	handler.ServeHTTP(unauthInfoRec, unauthInfoReq)
+	if unauthInfoRec.Code != http.StatusUnauthorized {
+		t.Errorf("Expected unauthenticated GET /api/info to return 401, got %d", unauthInfoRec.Code)
+	}
+
 	sessToken := createAdminSession(t, handler, testRootKey)
+
+	authInfoReq := httptest.NewRequest(http.MethodGet, "http://localhost:8080/api/info", nil)
+	authInfoReq.Header.Set("Authorization", "Bearer "+sessToken)
+	authInfoRec := httptest.NewRecorder()
+	handler.ServeHTTP(authInfoRec, authInfoReq)
+	if authInfoRec.Code != http.StatusOK || !strings.Contains(authInfoRec.Body.String(), `"version"`) {
+		t.Errorf("Expected authenticated GET /api/info to return 200 with version, got %d (%s)", authInfoRec.Code, authInfoRec.Body.String())
+	}
 
 	req := httptest.NewRequest(http.MethodPost, "http://localhost:8080/api/accounts/profile",
 		strings.NewReader(`{"account":"+15551234567","given_name":"Alice"}`))
@@ -736,7 +768,23 @@ func TestStrictCSPAndLogForgingProtection(t *testing.T) {
 	}
 
 	// 2. Verify /api/keys/<id> rejects malformed/newline-injected key IDs with 400 Bad Request
+	// Verify /api/info requires admin auth and returns version
+	unauthInfoReq := httptest.NewRequest(http.MethodGet, "http://localhost:8080/api/info", nil)
+	unauthInfoRec := httptest.NewRecorder()
+	handler.ServeHTTP(unauthInfoRec, unauthInfoReq)
+	if unauthInfoRec.Code != http.StatusUnauthorized {
+		t.Errorf("Expected unauthenticated GET /api/info to return 401, got %d", unauthInfoRec.Code)
+	}
+
 	sessToken := createAdminSession(t, handler, testRootKey)
+
+	authInfoReq := httptest.NewRequest(http.MethodGet, "http://localhost:8080/api/info", nil)
+	authInfoReq.Header.Set("Authorization", "Bearer "+sessToken)
+	authInfoRec := httptest.NewRecorder()
+	handler.ServeHTTP(authInfoRec, authInfoReq)
+	if authInfoRec.Code != http.StatusOK || !strings.Contains(authInfoRec.Body.String(), `"version"`) {
+		t.Errorf("Expected authenticated GET /api/info to return 200 with version, got %d (%s)", authInfoRec.Code, authInfoRec.Body.String())
+	}
 	forgedReq := httptest.NewRequest(http.MethodDelete, "http://localhost:8080/api/keys/key_bad%0Aforged-log-line", nil)
 	forgedReq.Header.Set("Authorization", "Bearer "+sessToken)
 	forgedRec := httptest.NewRecorder()
@@ -1323,7 +1371,23 @@ func TestAdminUIAndUpdateProfileEndpoint(t *testing.T) {
 		t.Errorf("Expected non-admin key on /api/accounts/profile to return 401, got %d", unauthProfileRec.Code)
 	}
 
+	// Verify /api/info requires admin auth and returns version
+	unauthInfoReq := httptest.NewRequest(http.MethodGet, "http://localhost:8080/api/info", nil)
+	unauthInfoRec := httptest.NewRecorder()
+	handler.ServeHTTP(unauthInfoRec, unauthInfoReq)
+	if unauthInfoRec.Code != http.StatusUnauthorized {
+		t.Errorf("Expected unauthenticated GET /api/info to return 401, got %d", unauthInfoRec.Code)
+	}
+
 	sessToken := createAdminSession(t, handler, testRootKey)
+
+	authInfoReq := httptest.NewRequest(http.MethodGet, "http://localhost:8080/api/info", nil)
+	authInfoReq.Header.Set("Authorization", "Bearer "+sessToken)
+	authInfoRec := httptest.NewRecorder()
+	handler.ServeHTTP(authInfoRec, authInfoReq)
+	if authInfoRec.Code != http.StatusOK || !strings.Contains(authInfoRec.Body.String(), `"version"`) {
+		t.Errorf("Expected authenticated GET /api/info to return 200 with version, got %d (%s)", authInfoRec.Code, authInfoRec.Body.String())
+	}
 
 	// 4. Reject flag injection in given_name or family_name
 	flagInjectReq := httptest.NewRequest(http.MethodPost, "http://localhost:8080/api/accounts/profile",
@@ -1411,7 +1475,23 @@ func TestKeyLastUsedAndExpiryAndDaemonLogSuppression(t *testing.T) {
 		apiKeyMgmt:   testRootKey,
 	}
 	handler := srv.Handler()
+	// Verify /api/info requires admin auth and returns version
+	unauthInfoReq := httptest.NewRequest(http.MethodGet, "http://localhost:8080/api/info", nil)
+	unauthInfoRec := httptest.NewRecorder()
+	handler.ServeHTTP(unauthInfoRec, unauthInfoReq)
+	if unauthInfoRec.Code != http.StatusUnauthorized {
+		t.Errorf("Expected unauthenticated GET /api/info to return 401, got %d", unauthInfoRec.Code)
+	}
+
 	sessToken := createAdminSession(t, handler, testRootKey)
+
+	authInfoReq := httptest.NewRequest(http.MethodGet, "http://localhost:8080/api/info", nil)
+	authInfoReq.Header.Set("Authorization", "Bearer "+sessToken)
+	authInfoRec := httptest.NewRecorder()
+	handler.ServeHTTP(authInfoRec, authInfoReq)
+	if authInfoRec.Code != http.StatusOK || !strings.Contains(authInfoRec.Body.String(), `"version"`) {
+		t.Errorf("Expected authenticated GET /api/info to return 200 with version, got %d (%s)", authInfoRec.Code, authInfoRec.Body.String())
+	}
 
 	// 1. Create a key via POST /api/keys with expires_in_days=30
 	createReq := httptest.NewRequest(http.MethodPost, "http://localhost:8080/api/keys",

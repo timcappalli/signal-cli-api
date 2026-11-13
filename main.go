@@ -54,7 +54,20 @@ const (
 	maxAvatarDimension    = 1024            // Max avatar width/height in pixels (caps decoded buffer at ~4-8 MB)
 )
 
-var errWSLimitExceeded = errors.New("websocket connection limit exceeded")
+var (
+	appVersion         = "dev"
+	errWSLimitExceeded = errors.New("websocket connection limit exceeded")
+)
+
+func effectiveVersion() string {
+	if v := strings.TrimSpace(appVersion); v != "" && v != "dev" {
+		return v
+	}
+	if envV := strings.TrimSpace(os.Getenv("APP_VERSION")); envV != "" {
+		return envV
+	}
+	return "dev"
+}
 
 // Valid key permissions
 const (
@@ -3325,6 +3338,16 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/profiles/", s.adminAuthMiddleware(s.handleUpdateProfile))
 	mux.HandleFunc("/api/keys", s.adminAuthMiddleware(s.handleListOrAddKeys))
 	mux.HandleFunc("/api/keys/", s.adminAuthMiddleware(s.handleRevokeKey))
+	mux.HandleFunc("/api/info", s.adminAuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeJSONError(w, http.StatusMethodNotAllowed, "Method not allowed")
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"version": effectiveVersion(),
+		})
+	}))
 
 	// Health check
 	mux.HandleFunc("/v1/health", func(w http.ResponseWriter, r *http.Request) {

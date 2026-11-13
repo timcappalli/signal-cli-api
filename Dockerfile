@@ -5,11 +5,13 @@ FROM golang:1.26-alpine@sha256:d200d2dd76b03a99b52651fd1325aff7dcd35422c35c01bac
 
 WORKDIR /src
 
+ARG VERSION=dev
+
 COPY go.mod ./
 COPY main.go keystore_test.go admin.html admin.js docs.html docs.js openapi.json ./
 
 RUN CGO_ENABLED=0 go test -v ./... && \
-    CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /bin/signal-api main.go
+    CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w -X main.appVersion=${VERSION}" -o /bin/signal-api main.go
 
 # -----------------------------------------------------------------------------
 # Stage 2: Hardened Alpine 3.24 Runtime with native signal-cli (non-root, no shell/curl)
@@ -41,10 +43,12 @@ COPY --chown=10001:10001 docs.js /app/docs.js
 COPY --chown=10001:10001 admin.html /app/admin.html
 COPY --chown=10001:10001 admin.js /app/admin.js
 
+ARG VERSION=dev
 ENV PORT=8080 \
     HOME=/home/.local/share/signal-cli \
     XDG_DATA_HOME=/home/.local/share \
-    SIGNAL_CLI_OPTS="-Dorg.sqlite.lib.path=/usr/lib"
+    SIGNAL_CLI_OPTS="-Dorg.sqlite.lib.path=/usr/lib" \
+    APP_VERSION=${VERSION}
 
 RUN printf '#!/bin/sh\nexec /app/signal-api register-recovery "$@"\n' > /usr/local/bin/register-recovery && \
     chmod 755 /usr/local/bin/register-recovery
@@ -59,4 +63,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
 ENTRYPOINT ["/app/signal-api"]
 
 LABEL org.opencontainers.image.source="https://github.com/timcappalli/signal-cli-api"
-LABEL org.opencontainers.image.version="1.0.2"
+LABEL org.opencontainers.image.version="1.1.0"

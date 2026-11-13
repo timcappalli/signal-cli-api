@@ -78,8 +78,25 @@ function showDashboard() {
   document.getElementById("dashboard-section").style.display = "block";
   document.getElementById("logout-btn-container").style.display = "inline-block";
   document.getElementById("session-timer-badge").style.display = "inline-flex";
+  loadAppInfo();
   loadKeys();
   loadAccountsList();
+}
+
+async function loadAppInfo() {
+  const badge = document.getElementById("app-version");
+  if (!badge) return;
+  try {
+    const res = await fetch("/api/info", {
+      headers: { "Authorization": "Bearer " + sessionToken }
+    });
+    if (!res.ok) return;
+    const data = await res.json();
+    if (data && data.version) {
+      badge.textContent = data.version;
+      badge.style.display = "inline-block";
+    }
+  } catch (_) {}
 }
 
 async function handleLogin(e) {
