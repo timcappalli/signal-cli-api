@@ -527,6 +527,7 @@ async function handleCreateKey(e) {
   const permissions = [];
   if (document.getElementById("permSend").checked) permissions.push("send");
   if (document.getElementById("permReceive").checked) permissions.push("receive");
+  if (document.getElementById("permChallenge").checked) permissions.push("challenge");
   if (document.getElementById("permAdmin").checked) permissions.push("admin");
 
   if (!name || accounts.length === 0 || permissions.length === 0) {

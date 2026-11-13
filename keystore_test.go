@@ -1799,6 +1799,10 @@ func TestRateLimitErrorSurfacingAndChallengeSubmission(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	challengeKey, err := ks.CreateKey("ChallengeOnly", []string{acctUUID}, []string{"challenge"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	adminKey, err := ks.CreateKey("Admin", []string{acctUUID}, []string{"admin"})
 	if err != nil {
 		t.Fatal(err)
@@ -1913,21 +1917,32 @@ func TestRateLimitErrorSurfacingAndChallengeSubmission(t *testing.T) {
 		t.Errorf("Expected upstream RPC error message in 502 body, got %s", errRec.Body.String())
 	}
 
-	// 3. Non-admin key cannot submit rate-limit challenge
-	nonAdminChallengeReq := httptest.NewRequest(http.MethodPost, "http://localhost:8080/v1/accounts/rate-limit-challenge",
+	// 3. Send-only key (without challenge or admin) gets 403 on rate-limit challenge
+	noChallengePermReq := httptest.NewRequest(http.MethodPost, "http://localhost:8080/v1/accounts/rate-limit-challenge",
 		strings.NewReader(`{"account":"`+acctUUID+`","challenge":"d887e9b0-8415-471a-a0f4-ab6a7c4a2e1d","captcha":"signalcaptcha://tok"}`))
-	nonAdminChallengeReq.Header.Set("Authorization", "Bearer "+sendKey.Key)
-	nonAdminChallengeReq.Header.Set("Content-Type", "application/json")
-	nonAdminChallengeRec := httptest.NewRecorder()
-	handler.ServeHTTP(nonAdminChallengeRec, nonAdminChallengeReq)
-	if nonAdminChallengeRec.Code != http.StatusUnauthorized {
-		t.Errorf("Expected 401 for non-admin key on /v1/accounts/rate-limit-challenge, got %d", nonAdminChallengeRec.Code)
+	noChallengePermReq.Header.Set("Authorization", "Bearer "+sendKey.Key)
+	noChallengePermReq.Header.Set("Content-Type", "application/json")
+	noChallengePermRec := httptest.NewRecorder()
+	handler.ServeHTTP(noChallengePermRec, noChallengePermReq)
+	if noChallengePermRec.Code != http.StatusForbidden {
+		t.Errorf("Expected 403 for send-only key on /v1/accounts/rate-limit-challenge, got %d", noChallengePermRec.Code)
+	}
+
+	// 3b. Challenge-only key cannot send messages (least privilege)
+	challengeSendReq := httptest.NewRequest(http.MethodPost, "http://localhost:8080/v2/send",
+		strings.NewReader(`{"account":"`+acctUUID+`","recipients":["+16179496228"],"message":"hello"}`))
+	challengeSendReq.Header.Set("Authorization", "Bearer "+challengeKey.Key)
+	challengeSendReq.Header.Set("Content-Type", "application/json")
+	challengeSendRec := httptest.NewRecorder()
+	handler.ServeHTTP(challengeSendRec, challengeSendReq)
+	if challengeSendRec.Code != http.StatusForbidden {
+		t.Errorf("Expected 403 for challenge-only key on /v2/send, got %d", challengeSendRec.Code)
 	}
 
 	// 4. Missing challenge/captcha returns 400
 	badChallengeReq := httptest.NewRequest(http.MethodPost, "http://localhost:8080/v1/accounts/rate-limit-challenge",
 		strings.NewReader(`{"account":"`+acctUUID+`","challenge":"","captcha":"signalcaptcha://tok"}`))
-	badChallengeReq.Header.Set("Authorization", "Bearer "+adminKey.Key)
+	badChallengeReq.Header.Set("Authorization", "Bearer "+challengeKey.Key)
 	badChallengeReq.Header.Set("Content-Type", "application/json")
 	badChallengeRec := httptest.NewRecorder()
 	handler.ServeHTTP(badChallengeRec, badChallengeReq)
@@ -1935,15 +1950,15 @@ func TestRateLimitErrorSurfacingAndChallengeSubmission(t *testing.T) {
 		t.Errorf("Expected 400 for empty challenge, got %d", badChallengeRec.Code)
 	}
 
-	// 5. Valid admin key submits submitRateLimitChallenge with auto-resolved single-account UUID
+	// 5. Challenge-only key submits submitRateLimitChallenge with auto-resolved single-account UUID
 	okChallengeReq := httptest.NewRequest(http.MethodPost, "http://localhost:8080/v1/accounts/rate-limit-challenge",
 		strings.NewReader(`{"challenge":"d887e9b0-8415-471a-a0f4-ab6a7c4a2e1d","captcha":"signalcaptcha://solved-token"}`))
-	okChallengeReq.Header.Set("Authorization", "Bearer "+adminKey.Key)
+	okChallengeReq.Header.Set("Authorization", "Bearer "+challengeKey.Key)
 	okChallengeReq.Header.Set("Content-Type", "application/json")
 	okChallengeRec := httptest.NewRecorder()
 	handler.ServeHTTP(okChallengeRec, okChallengeReq)
 	if okChallengeRec.Code != http.StatusOK {
-		t.Fatalf("Expected 200 from /v1/accounts/rate-limit-challenge, got %d (%s)", okChallengeRec.Code, okChallengeRec.Body.String())
+		t.Fatalf("Expected 200 from /v1/accounts/rate-limit-challenge with challenge key, got %d (%s)", okChallengeRec.Code, okChallengeRec.Body.String())
 	}
 
 	mu.Lock()
@@ -1952,7 +1967,19 @@ func TestRateLimitErrorSurfacingAndChallengeSubmission(t *testing.T) {
 		t.Errorf("Unexpected RPC params: method=%q account=%q challenge=%q captcha=%q",
 			capturedMethod, capturedAccount, capturedChallenge, capturedCaptcha)
 	}
+	capturedMethod, capturedAccount, capturedChallenge, capturedCaptcha = "", "", "", ""
 	mu.Unlock()
+
+	// 6. Admin key can also submit submitRateLimitChallenge
+	adminChallengeReq := httptest.NewRequest(http.MethodPost, "http://localhost:8080/v1/accounts/rate-limit-challenge",
+		strings.NewReader(`{"challenge":"d887e9b0-8415-471a-a0f4-ab6a7c4a2e1d","captcha":"signalcaptcha://admin-token"}`))
+	adminChallengeReq.Header.Set("Authorization", "Bearer "+adminKey.Key)
+	adminChallengeReq.Header.Set("Content-Type", "application/json")
+	adminChallengeRec := httptest.NewRecorder()
+	handler.ServeHTTP(adminChallengeRec, adminChallengeReq)
+	if adminChallengeRec.Code != http.StatusOK {
+		t.Fatalf("Expected 200 from /v1/accounts/rate-limit-challenge with admin key, got %d (%s)", adminChallengeRec.Code, adminChallengeRec.Body.String())
+	}
 }
 
 

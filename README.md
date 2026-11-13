@@ -106,7 +106,7 @@ signal.example.com {
 2. Enter your root admin key (`API_KEY_MGMT`).
 3. A secure **3-minute session** is initialized with a live countdown display in the header (`🔒 Session: 03:00`). Both the server and UI enforce a **3-minute hard expiration** and a **2-minute inactivity auto-lock**.
 4. **Account Profile**: Select or enter an Account ID (`+15551234567` or ACI UUID), enter a **First Name** (required), an optional **Last Name**, and optionally upload a **Profile Photo** (PNG, JPEG, WebP, or GIF, up to 3 MB), then click **Save Profile**. This runs `signal-cli -a <ACCOUNT_ID> updateProfile --given-name <GIVEN_NAME> [--family-name <FAMILY_NAME>] [--avatar <IMAGE_PATH>]`.
-5. **API Keys**: Enter a Service Name (e.g. `IETF Moderator`), Allowed Accounts (e.g. `+15551234567`), select permissions (`send`, `receive`, `admin`), and click **Generate Key**.
+5. **API Keys**: Enter a Service Name (e.g. `IETF Moderator`), Allowed Accounts (e.g. `+15551234567`), select permissions (`send`, `receive`, `challenge`, `admin`), and click **Generate Key**.
 6. Copy the generated key (e.g. `sig_8a3f2b...`) and paste it into the client service's configuration (`SIGNAL_API_KEY`).
 
 ### Via REST API

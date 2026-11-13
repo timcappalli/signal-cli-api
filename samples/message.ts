@@ -85,8 +85,8 @@ Options & Environment Variables:
   --destphone="<+E164>"       Destination phone number in E.164 format
   --destusername="<user.01>"  Destination Signal username (e.g. alice.01)
   --account="<account>"       Sender Signal account phone or UUID (optional if only 1 account or single-account key)
-  --api-key="<sig_...>"       Scoped client API key with send+receive (or set SIGNAL_API_KEY)
-  --admin-key="<key>"         Optional admin API key (sig_...) or API_KEY_MGMT for resolving rate-limit challenges (or set SIGNAL_ADMIN_KEY)
+  --api-key="<sig_...>"       Scoped client API key with send+receive (and optionally challenge) (or set SIGNAL_API_KEY)
+  --admin-key="<key>"         Optional challenge/admin API key (sig_...) or API_KEY_MGMT for resolving rate-limit challenges (or set SIGNAL_ADMIN_KEY)
   --url="<http://...>"        Signal API base URL (default: SIGNAL_API_URL or http://localhost:8080)
   --timeout="<seconds>"       Seconds to wait for a reply before exiting (default: 300)
   --help                      Show this help message
@@ -226,7 +226,7 @@ async function promptAndResolveRateLimitChallenge(errBody: RateLimitErrorBody): 
     let submitted = await submitRateLimitChallenge(challenge, captcha, candidateKey);
     if (!submitted) {
       const enteredAdmin = (
-        await rl.question("Current key lacks admin permission. Enter admin API key (sig_...) or API_KEY_MGMT: ")
+        await rl.question("Current key lacks challenge/admin permission. Enter challenge/admin API key (sig_...) or API_KEY_MGMT: ")
       ).trim();
       if (!enteredAdmin) {
         return false;

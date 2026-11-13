@@ -146,7 +146,7 @@
                       },
                       "permissions": {
                         "type": "array",
-                        "items": { "type": "string", "enum": ["send", "receive", "admin"] }
+                        "items": { "type": "string", "enum": ["send", "receive", "challenge", "admin"] }
                       },
                       "created_at": { "type": "string", "format": "date-time" },
                       "last_used_at": { "type": "string", "format": "date-time" },
@@ -188,7 +188,7 @@
                     "type": "array",
                     "items": {
                       "type": "string",
-                      "enum": ["send", "receive", "admin"]
+                      "enum": ["send", "receive", "challenge", "admin"]
                     },
                     "example": ["send", "receive"]
                   },
@@ -266,7 +266,7 @@
     "/v1/accounts/rate-limit-challenge": {
       "post": {
         "summary": "Submit Rate-Limit Challenge",
-        "description": "Submits a solved Signal CAPTCHA token (`signalcaptcha://...` from https://signalcaptchas.org/challenge/generate.html) for a `challenge` token returned by an upstream `RATE_LIMIT_FAILURE` (429) error. Requires an admin session token or an API key with `admin` permission.",
+        "description": "Submits a solved Signal CAPTCHA token (`signalcaptcha://...` from https://signalcaptchas.org/challenge/generate.html) for a `challenge` token returned by an upstream `RATE_LIMIT_FAILURE` (429) error. Requires an API key with `challenge` (or `admin`) permission, or an admin session token.",
         "operationId": "submitRateLimitChallenge",
         "security": [{"bearerAuth": []}],
         "requestBody": {
@@ -305,10 +305,10 @@
             "description": "Missing or invalid account, challenge, or captcha token"
           },
           "401": {
-            "description": "Unauthorized (admin session or admin API key required)"
+            "description": "Unauthorized (invalid or missing API key)"
           },
           "403": {
-            "description": "Forbidden (key lacks admin permission for account)"
+            "description": "Forbidden (key lacks challenge or admin permission for account)"
           },
           "502": {
             "description": "Upstream signal-cli daemon error"

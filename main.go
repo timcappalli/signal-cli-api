@@ -71,9 +71,10 @@ func effectiveVersion() string {
 
 // Valid key permissions
 const (
-	PermSend    = "send"
-	PermReceive = "receive"
-	PermAdmin   = "admin"
+	PermSend      = "send"
+	PermReceive   = "receive"
+	PermChallenge = "challenge"
+	PermAdmin     = "admin"
 )
 
 var (
@@ -225,7 +226,7 @@ type APIKey struct {
 	KeyHash     string     `json:"key_hash,omitempty"`     // Hex-encoded SHA-256 of the secret key
 	Prefix      string     `json:"prefix"`                 // Display prefix (e.g. "sig_8a3f...d4")
 	Accounts    []string   `json:"accounts"`               // Allowed account identifiers (or "*" for all)
-	Permissions []string   `json:"permissions"`            // Allowed permissions: "send", "receive", "admin"
+	Permissions []string   `json:"permissions"`            // Allowed permissions: "send", "receive", "challenge", "admin"
 	CreatedAt   time.Time  `json:"created_at"`
 	LastUsedAt  *time.Time `json:"last_used_at,omitempty"` // Updated when the key authenticates a request
 	ExpiresAt   *time.Time `json:"expires_at,omitempty"`   // Optional key expiration timestamp
@@ -477,9 +478,9 @@ func normalizePermissions(perms []string) ([]string, error) {
 			continue
 		}
 		switch norm {
-		case PermSend, PermReceive, PermAdmin:
+		case PermSend, PermReceive, PermChallenge, PermAdmin:
 		default:
-			return nil, fmt.Errorf("invalid permission %q (must be send, receive, or admin)", norm)
+			return nil, fmt.Errorf("invalid permission %q (must be send, receive, challenge, or admin)", norm)
 		}
 		if !seen[norm] {
 			seen[norm] = true
@@ -487,7 +488,7 @@ func normalizePermissions(perms []string) ([]string, error) {
 		}
 	}
 	if len(out) == 0 {
-		return nil, errors.New("at least one permission (send, receive, or admin) is required")
+		return nil, errors.New("at least one permission (send, receive, challenge, or admin) is required")
 	}
 	return out, nil
 }
@@ -2659,7 +2660,7 @@ func (s *Server) clientAuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 				KeyID:        "session:" + headerToken,
 				SessionToken: headerToken,
 				Accounts:     []string{"*"},
-				Permissions:  []string{PermSend, PermReceive, PermAdmin},
+				Permissions:  []string{PermSend, PermReceive, PermChallenge, PermAdmin},
 			}
 			next(w, r.WithContext(context.WithValue(r.Context(), principalContextKey, p)))
 			return
@@ -2671,7 +2672,7 @@ func (s *Server) clientAuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 				IsRoot:      true,
 				KeyID:       "unauth:" + s.realClientIP(r),
 				Accounts:    []string{"*"},
-				Permissions: []string{PermSend, PermReceive, PermAdmin},
+				Permissions: []string{PermSend, PermReceive, PermChallenge, PermAdmin},
 			}
 			next(w, r.WithContext(context.WithValue(r.Context(), principalContextKey, principal)))
 			return
@@ -2702,14 +2703,14 @@ func (s *Server) adminAuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 			p := &AuthPrincipal{
 				IsRoot:      true,
 				Accounts:    []string{"*"},
-				Permissions: []string{PermSend, PermReceive, PermAdmin},
+				Permissions: []string{PermSend, PermReceive, PermChallenge, PermAdmin},
 			}
 			next(w, r.WithContext(context.WithValue(r.Context(), principalContextKey, p)))
 			return
 		}
 
-		// Also allow a client API key explicitly granted "admin" permission for profile and rate-limit challenge endpoints
-		if (r.URL.Path == "/api/accounts/profile" || r.URL.Path == "/v1/profiles" || strings.HasPrefix(r.URL.Path, "/v1/profiles/") || r.URL.Path == "/v1/accounts/rate-limit-challenge") && s.keyStore != nil && token != "" {
+		// Also allow a client API key explicitly granted "admin" permission for profile endpoints
+		if (r.URL.Path == "/api/accounts/profile" || r.URL.Path == "/v1/profiles" || strings.HasPrefix(r.URL.Path, "/v1/profiles/")) && s.keyStore != nil && token != "" {
 			if k, ok := s.keyStore.LookupKey(token); ok && k.HasPermission(PermAdmin) {
 				p := &AuthPrincipal{
 					IsRoot:      false,
@@ -3456,8 +3457,8 @@ func (s *Server) handleRateLimitChallenge(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	if !principal.HasPermission(PermAdmin) || !principal.AllowsAccount(account) {
-		writeJSONError(w, http.StatusForbidden, "Forbidden: admin permission for this account is required to submit rate-limit challenges.")
+	if !principal.HasPermission(PermChallenge) || !principal.AllowsAccount(account) {
+		writeJSONError(w, http.StatusForbidden, "Forbidden: challenge or admin permission for this account is required to submit rate-limit challenges.")
 		return
 	}
 
@@ -3562,9 +3563,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/auth/login", s.handleAdminLogin)
 	mux.HandleFunc("/api/auth/logout", s.handleAdminLogout)
 
+	// Account Rate-Limit Challenge (Requires "challenge" or "admin" permission, or admin session)
+	mux.HandleFunc("/v1/accounts/rate-limit-challenge", s.clientAuthMiddleware(s.handleRateLimitChallenge))
+
 	// Admin Endpoints: Account Profile & API Key Management (Requires valid 3-minute session token)
 	mux.HandleFunc("/api/accounts/profile", s.adminAuthMiddleware(s.handleUpdateProfile))
-	mux.HandleFunc("/v1/accounts/rate-limit-challenge", s.adminAuthMiddleware(s.handleRateLimitChallenge))
 	mux.HandleFunc("/v1/profiles", s.adminAuthMiddleware(s.handleUpdateProfile))
 	mux.HandleFunc("/v1/profiles/", s.adminAuthMiddleware(s.handleUpdateProfile))
 	mux.HandleFunc("/api/keys", s.adminAuthMiddleware(s.handleListOrAddKeys))

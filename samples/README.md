@@ -9,7 +9,7 @@
 ## Prerequisites
 
 - **Node.js 22.6+** (supports running `.ts` files directly via `node message.ts` with no build step or `npm install`).
-- A scoped client API key (`sig_...`) generated in `/admin` with `send` and `receive` permissions for your Signal account.
+- A scoped client API key (`sig_...`) generated in `/admin` with `send` and `receive` permissions (and optionally `challenge` to resolve 429 rate-limit challenges) for your Signal account.
 
 ## Usage
 
