@@ -1,0 +1,9 @@
+[tools]
+node = "24"
+
+[env]
+_.file = { path = ".env.local", redact = true }
+
+[tasks.message]
+description = "Send a Signal message and wait for a reply or reaction"
+run = "node message.ts"

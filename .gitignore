@@ -1,0 +1,26 @@
+# Disallow all files by default
+*
+
+# Explicitly allow project files
+!.dockerignore
+!.gitignore
+!.env.example
+!Dockerfile
+!README.md
+!admin.html
+!admin.js
+!docker-compose.yml
+!docs.html
+!docs.js
+!go.mod
+!go.sum
+!*.go
+!mise.toml
+!openapi.json
+!register.sh
+!samples/
+!samples/.env.example
+!samples/README.md
+!samples/message.ts
+!samples/mise.toml
+!samples/package.json

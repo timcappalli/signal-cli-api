@@ -1,0 +1,12 @@
+{
+  "name": "signal-cli-api-samples",
+  "private": true,
+  "type": "module",
+  "description": "Sample Node.js/TypeScript CLI for sending a Signal message and waiting for a reply",
+  "engines": {
+    "node": ">=22.6.0"
+  },
+  "scripts": {
+    "message": "node message.ts"
+  }
+}

@@ -1,0 +1,13 @@
+# Disallow all files by default (excludes .env, data/, .git, etc. from Docker build context)
+*
+
+# Explicitly allow only files needed to build and package the container
+!go.mod
+!go.sum
+!main.go
+!keystore_test.go
+!openapi.json
+!docs.html
+!docs.js
+!admin.html
+!admin.js

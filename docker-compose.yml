@@ -1,0 +1,36 @@
+services:
+  signal-api:
+    image: ghcr.io/timcappalli/signal-cli-api:latest
+    container_name: signal-api
+    restart: unless-stopped
+    user: "10001:10001"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    mem_limit: 1g
+    ports:
+      - "127.0.0.1:${PORT:-8080}:8080"
+    environment:
+      - PORT=8080
+      # Root Admin key for generating and managing client API keys (required)
+      - API_KEY_MGMT=${API_KEY_MGMT:?API_KEY_MGMT must be set}
+      - ALLOWED_HOSTS=${ALLOWED_HOSTS:-}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-}
+      - TRUSTED_PROXY_HEADER=${TRUSTED_PROXY_HEADER:-}
+      - TRUSTED_PROXIES=${TRUSTED_PROXIES:-}
+    volumes:
+      - signal-data:/home/.local/share/signal-cli
+    healthcheck:
+      test: ["CMD", "/app/signal-api", "healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  signal-data:

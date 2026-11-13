@@ -1,0 +1,531 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Signal CLI REST API",
+    "description": "REST and WebSocket API for signal-cli, providing message routing, reactions, group management, and account administration.",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "/",
+      "description": "Current server"
+    }
+  ],
+  "security": [
+    {
+      "bearerAuth": []
+    },
+    {
+      "apiKeyAuth": []
+    }
+  ],
+  "paths": {
+    "/api/accounts/profile": {
+      "post": {
+        "summary": "Update Signal Account Profile",
+        "description": "Updates a Signal account's first name (given_name), optional last name (family_name), and optional profile photo (avatar). If `account` is omitted, automatically resolves the single account when unambiguous. Requires an active admin session token or a client key with `admin` permission.",
+        "operationId": "updateAccountProfile",
+        "security": [{"bearerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["given_name"],
+                "properties": {
+                  "account": {
+                    "type": "string",
+                    "description": "Account identifier (E.164 phone number or ACI UUID). Optional when only 1 account is registered or the key is scoped to a single account.",
+                    "example": "+15551234567"
+                  },
+                  "given_name": {
+                    "type": "string",
+                    "description": "First name (required, 1-64 characters)",
+                    "example": "IETF"
+                  },
+                  "family_name": {
+                    "type": "string",
+                    "description": "Last name (optional, up to 64 characters)",
+                    "example": "Moderator"
+                  },
+                  "avatar": {
+                    "type": "string",
+                    "description": "Optional base64-encoded image or data URL (PNG, JPEG, or GIF; max 3 MB, max 1024x1024 px, decoded and re-encoded as PNG)",
+                    "example": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Account profile updated"
+          },
+          "400": {
+            "description": "Invalid parameters or unsupported avatar image"
+          },
+          "401": {
+            "description": "Unauthorized (admin session required)"
+          }
+        }
+      }
+    },
+    "/api/keys": {
+      "get": {
+        "summary": "List Client API Keys",
+        "description": "Returns a list of all active client API keys including creation, last-used, and optional expiration timestamps. Requires an active admin session token.",
+        "operationId": "listApiKeys",
+        "security": [{"bearerAuth": []}],
+        "responses": {
+          "200": {
+            "description": "List of active API keys",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": { "type": "string", "example": "key_0102030405060708" },
+                      "name": { "type": "string", "example": "IETF Moderator Bot" },
+                      "prefix": { "type": "string", "example": "sig_8a3f..." },
+                      "accounts": {
+                        "type": "array",
+                        "items": { "type": "string" }
+                      },
+                      "permissions": {
+                        "type": "array",
+                        "items": { "type": "string", "enum": ["send", "receive", "admin"] }
+                      },
+                      "created_at": { "type": "string", "format": "date-time" },
+                      "last_used_at": { "type": "string", "format": "date-time" },
+                      "expires_at": { "type": "string", "format": "date-time" }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized (admin session required)"
+          }
+        }
+      },
+      "post": {
+        "summary": "Generate Client API Key",
+        "description": "Creates a new scoped client API key for a service. Requires an active admin session token.",
+        "operationId": "createApiKey",
+        "security": [{"bearerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["name", "accounts", "permissions"],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "example": "IETF Moderator Bot"
+                  },
+                  "accounts": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "example": ["+15551234567"]
+                  },
+                  "permissions": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": ["send", "receive", "admin"]
+                    },
+                    "example": ["send", "receive"]
+                  },
+                  "expires_in_days": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 3650,
+                    "description": "Optional number of days until the key expires",
+                    "example": 90
+                  },
+                  "expires_at": {
+                    "type": "string",
+                    "format": "date-time",
+                    "description": "Optional explicit UTC expiration timestamp"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "API Key created successfully (returns full secret key once)"
+          }
+        }
+      }
+    },
+    "/api/keys/{id}": {
+      "delete": {
+        "summary": "Revoke Client API Key",
+        "description": "Revokes and deletes an existing client API key and immediately disconnects any open WebSockets using it. Requires an active admin session token.",
+        "operationId": "revokeApiKey",
+        "security": [{"bearerAuth": []}],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Key revoked"
+          },
+          "404": {
+            "description": "Key not found"
+          }
+        }
+      }
+    },
+    "/v1/accounts": {
+      "get": {
+        "summary": "List Accounts",
+        "description": "Returns a list of registered or linked Signal accounts authorized for the caller's API key.",
+        "operationId": "listAccounts",
+        "responses": {
+          "200": {
+            "description": "List of account identifiers (phone numbers or ACI UUIDs)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "example": "+15551234567"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/groups": {
+      "get": {
+        "summary": "List Groups (Default Account)",
+        "description": "Returns all Signal groups for the single resolved account (when the API key is scoped to one account or only one account is registered).",
+        "operationId": "listGroupsDefaultAccount",
+        "responses": {
+          "200": {
+            "description": "List of groups"
+          },
+          "400": {
+            "description": "Multiple or zero accounts available; specify /v1/groups/{number}"
+          }
+        }
+      }
+    },
+    "/v1/groups/{number}": {
+      "get": {
+        "summary": "List Groups",
+        "description": "Returns all Signal groups that the specified account belongs to.",
+        "operationId": "listGroups",
+        "parameters": [
+          {
+            "name": "number",
+            "in": "path",
+            "required": true,
+            "description": "Account identifier (E.164 phone number or ACI UUID)",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of groups",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "members": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/reactions": {
+      "post": {
+        "summary": "Send Reaction (Default Account)",
+        "description": "Reacts to a message with an emoji using the single resolved account (when the API key is scoped to one account or only one account is registered).",
+        "operationId": "sendReactionDefaultAccount",
+        "requestBody": {
+          "$ref": "#/paths/~1v1~1reactions~1{number}/post/requestBody"
+        },
+        "responses": {
+          "204": {
+            "description": "Reaction sent successfully"
+          },
+          "400": {
+            "description": "Bad Request"
+          }
+        }
+      }
+    },
+    "/v1/reactions/{number}": {
+      "post": {
+        "summary": "Send Reaction",
+        "description": "Reacts to a message with an emoji.",
+        "operationId": "sendReaction",
+        "parameters": [
+          {
+            "name": "number",
+            "in": "path",
+            "required": true,
+            "description": "Account identifier (E.164 phone number or ACI UUID)",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["recipient", "reaction", "target_author", "timestamp"],
+                "properties": {
+                  "recipient": {
+                    "type": "string",
+                    "description": "Target phone number, UUID, Signal username (e.g. alice.01), or group ID",
+                    "example": "+15559876543"
+                  },
+                  "reaction": {
+                    "type": "string",
+                    "description": "Single emoji to react with",
+                    "example": "👍"
+                  },
+                  "target_author": {
+                    "type": "string",
+                    "description": "UUID or phone number of author who sent the target message",
+                    "example": "8f8b631d-1234-5678-90ab-cdef12345678"
+                  },
+                  "timestamp": {
+                    "type": "integer",
+                    "format": "int64",
+                    "description": "Timestamp of the target message",
+                    "example": 1731430000000
+                  },
+                  "remove": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Set to true to remove an existing reaction"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Reaction sent successfully"
+          },
+          "400": {
+            "description": "Bad Request"
+          }
+        }
+      }
+    },
+    "/v1/receive": {
+      "get": {
+        "summary": "Receive Messages (Default Account — HTTP & WebSocket)",
+        "description": "Retrieves recent messages or upgrades to a real-time WebSocket stream (`ws(s)://<host>/v1/receive`) for the single resolved account (when the API key is scoped to one account or only one account is registered).",
+        "operationId": "receiveMessagesDefaultAccount",
+        "responses": {
+          "200": {
+            "description": "Array of message envelopes"
+          },
+          "101": {
+            "description": "Switching Protocols (WebSocket real-time receive stream)"
+          }
+        }
+      }
+    },
+    "/v1/receive/{number}": {
+      "get": {
+        "summary": "Receive Messages (HTTP & WebSocket)",
+        "description": "Retrieves recent messages for the account over HTTP GET, or upgrades to a real-time WebSocket stream at `ws(s)://<host>/v1/receive/{number}`.",
+        "operationId": "receiveMessages",
+        "parameters": [
+          {
+            "name": "number",
+            "in": "path",
+            "required": true,
+            "description": "Account identifier (E.164 phone number or ACI UUID)",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Array of message envelopes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "jsonrpc": { "type": "string", "example": "2.0" },
+                      "method": { "type": "string", "example": "receive" },
+                      "params": {
+                        "type": "object",
+                        "properties": {
+                          "account": { "type": "string" },
+                          "envelope": {
+                            "type": "object",
+                            "properties": {
+                              "source": { "type": "string" },
+                              "sourceNumber": { "type": "string" },
+                              "sourceUuid": { "type": "string" },
+                              "timestamp": { "type": "integer" },
+                              "dataMessage": {
+                                "type": "object",
+                                "properties": {
+                                  "timestamp": { "type": "integer" },
+                                  "message": { "type": "string" },
+                                  "groupInfo": {
+                                    "type": "object",
+                                    "properties": {
+                                      "groupId": { "type": "string" }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "101": {
+            "description": "Switching Protocols (WebSocket real-time receive stream)"
+          }
+        }
+      }
+    },
+    "/v2/send": {
+      "post": {
+        "summary": "Send Message",
+        "description": "Sends a message to one or more recipients (E.164 phone numbers, UUIDs, Signal usernames, or group IDs). If `number` (or `account`) is omitted, automatically resolves the single sender account when unambiguous.",
+        "operationId": "sendMessage",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["recipients", "message"],
+                "properties": {
+                  "number": {
+                    "type": "string",
+                    "description": "Sender account identifier (phone number or ACI UUID). Optional when only 1 account is registered or the key is scoped to a single account.",
+                    "example": "+15551234567"
+                  },
+                  "account": {
+                    "type": "string",
+                    "description": "Alias for `number` (optional when only 1 account is registered or the key is scoped to a single account)."
+                  },
+                  "recipients": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Recipient phone numbers, UUIDs, Signal usernames (e.g. alice.01), or group IDs"
+                  },
+                  "message": {
+                    "type": "string",
+                    "description": "Message text to send"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Message sent successfully"
+          }
+        }
+      }
+    },
+    "/v1/health": {
+      "get": {
+        "summary": "Health Check",
+        "description": "Returns the health and operational status of the service.",
+        "operationId": "getHealth",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Service is healthy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "example": "ok"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "Scoped API Key (sig_...) or Admin Session Token (adm_sess_...)"
+      },
+      "apiKeyAuth": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-API-Key"
+      }
+    }
+  }
+}

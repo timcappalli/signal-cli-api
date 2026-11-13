@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Signal API Admin</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card-bg: #1e293b;
+      --border: #334155;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --primary: #3b82f6;
+      --primary-hover: #2563eb;
+      --danger: #ef4444;
+      --danger-hover: #dc2626;
+      --warning: #f59e0b;
+      --success: #10b981;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { background-color: var(--bg); color: var(--text); padding: 32px 16px; min-height: 100vh; }
+    .container { max-width: 920px; margin: 0 auto; }
+
+    header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; padding-bottom: 16px; border-bottom: 1px solid var(--border); }
+    h1 { font-size: 24px; font-weight: 600; display: flex; align-items: center; gap: 10px; }
+    .badge { font-size: 12px; background: #3b82f620; color: var(--primary); padding: 4px 10px; border-radius: 9999px; border: 1px solid #3b82f640; }
+
+    /* Session Timeout Badge in Header */
+    .session-badge {
+      display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-family: monospace;
+      padding: 4px 10px; border-radius: 6px; font-weight: 500; transition: all 0.3s;
+    }
+    .session-normal { background: #10b98115; color: #34d399; border: 1px solid #10b98130; }
+    .session-warning { background: #f59e0b20; color: #fbbf24; border: 1px solid #f59e0b40; animation: pulse 1s infinite; }
+    .session-critical { background: #ef444420; color: #f87171; border: 1px solid #ef444440; animation: pulse 0.5s infinite; }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.6; }
+    }
+
+    .card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px; padding: 24px; margin-bottom: 24px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); }
+    .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+    .card-subtitle { font-size: 13px; color: var(--text-muted); margin-bottom: 16px; }
+
+    /* Login Box */
+    #login-section { max-width: 460px; margin: 60px auto; }
+    .form-group { margin-bottom: 16px; }
+    label { display: block; font-size: 13px; color: var(--text-muted); margin-bottom: 6px; font-weight: 500; }
+    input[type="text"], input[type="password"], input[type="file"] {
+      width: 100%; padding: 10px 14px; background: #0f172a; border: 1px solid var(--border);
+      border-radius: 6px; color: var(--text); font-size: 14px; outline: none; transition: border-color 0.2s;
+    }
+    input[type="file"] { padding: 8px 10px; font-size: 13px; cursor: pointer; }
+    input:focus { border-color: var(--primary); }
+
+    button {
+      padding: 10px 18px; border-radius: 6px; font-size: 14px; font-weight: 500; cursor: pointer;
+      border: none; transition: all 0.2s; display: inline-flex; align-items: center; gap: 8px;
+    }
+    button:disabled { opacity: 0.6; cursor: not-allowed; }
+    .btn-primary { background: var(--primary); color: white; }
+    .btn-primary:hover:not(:disabled) { background: var(--primary-hover); }
+    .btn-danger { background: #ef444420; color: var(--danger); border: 1px solid #ef444440; padding: 6px 12px; font-size: 13px; }
+    .btn-danger:hover { background: var(--danger); color: white; }
+    .btn-secondary { background: transparent; color: var(--text-muted); border: 1px solid var(--border); }
+    .btn-secondary:hover { background: #33415550; color: var(--text); }
+    .btn-copy { background: #334155; color: var(--text); padding: 4px 8px; font-size: 12px; border-radius: 4px; }
+    .btn-copy:hover { background: #475569; }
+
+    /* Alerts */
+    #session-alert {
+      display: none; background: #ef444415; border: 1px solid #ef444440; border-radius: 8px;
+      padding: 14px; margin-bottom: 20px; color: #f87171; font-size: 14px;
+    }
+
+    #new-key-alert {
+      display: none; background: #10b98115; border: 1px solid #10b98140; border-radius: 8px;
+      padding: 16px; margin-bottom: 24px;
+    }
+    .key-box {
+      display: flex; align-items: center; justify-content: space-between; background: #0f172a;
+      padding: 8px 12px; border-radius: 6px; font-family: monospace; font-size: 14px; margin-top: 8px;
+      border: 1px dashed var(--success); color: #34d399; word-break: break-all;
+    }
+
+    .status-banner {
+      display: none; padding: 10px 14px; border-radius: 6px; font-size: 13px; margin-top: 12px;
+    }
+    .status-success { background: #10b98115; border: 1px solid #10b98140; color: #34d399; }
+    .status-error { background: #ef444415; border: 1px solid #ef444440; color: #f87171; }
+
+    /* Profile Grid & Avatar Preview */
+    .profile-grid {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin-bottom: 14px;
+    }
+    .avatar-row {
+      display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+      padding-top: 8px; border-top: 1px solid var(--border);
+    }
+    .avatar-upload-group {
+      display: flex; align-items: center; gap: 14px; flex: 1; min-width: 260px;
+    }
+    .avatar-preview {
+      width: 48px; height: 48px; border-radius: 50%; background: #0f172a; border: 1px solid var(--border);
+      object-fit: cover; flex-shrink: 0; display: none;
+    }
+
+    /* Key List Table */
+    table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+    th { text-align: left; padding: 12px; color: var(--text-muted); font-size: 13px; font-weight: 500; border-bottom: 1px solid var(--border); }
+    td { padding: 14px 12px; border-bottom: 1px solid var(--border); font-size: 14px; vertical-align: middle; }
+    .token-preview { font-family: monospace; color: var(--text-muted); background: #0f172a; padding: 4px 8px; border-radius: 4px; font-size: 13px; }
+    .empty-state { text-align: center; padding: 32px; color: var(--text-muted); }
+
+    .nav-links { display: flex; align-items: center; gap: 14px; font-size: 13px; }
+    .nav-links a { color: var(--text-muted); text-decoration: none; }
+    .nav-links a:hover { color: var(--primary); }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- Header -->
+    <header>
+      <div>
+        <h1>Signal API <span class="badge">Admin</span></h1>
+      </div>
+      <div class="nav-links">
+        <span id="session-timer-badge" class="session-badge session-normal" style="display: none;">
+          🔒 Session: <span id="session-countdown">03:00</span>
+        </span>
+        <a href="/docs">OpenAPI Docs</a>
+        <a href="/openapi.json">Spec JSON</a>
+        <span id="logout-btn-container" style="display: none;">
+          <button type="button" id="logout-btn" class="btn-secondary" style="padding: 4px 10px; font-size: 12px;">Lock Session</button>
+        </span>
+      </div>
+    </header>
+
+    <!-- Session Expiration Alert -->
+    <div id="session-alert"></div>
+
+    <!-- Login Form (if no active session) -->
+    <div id="login-section" class="card">
+      <h2 style="font-size: 18px; margin-bottom: 8px;">Admin Authentication</h2>
+      <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 16px;">
+        Enter your root administration key (<code style="color:#60a5fa">API_KEY_MGMT</code>) to open an admin session.
+      </p>
+      <div style="background: #3b82f615; border: 1px solid #3b82f630; border-radius: 6px; padding: 10px 12px; font-size: 12px; color: #93c5fd; margin-bottom: 20px;">
+        ⏱️ <strong>Security Timeout:</strong> Sessions expire automatically after <strong>3 minutes</strong> (or 2 minutes of inactivity) requiring re-authentication.
+      </div>
+      <form id="login-form">
+        <div class="form-group">
+          <label for="adminKeyInput">Root Admin Key (API_KEY_MGMT)</label>
+          <input type="password" id="adminKeyInput" placeholder="Enter root admin key..." required autofocus />
+        </div>
+        <div id="login-error" style="color: var(--danger); font-size: 13px; margin-bottom: 12px; display: none;"></div>
+        <button type="submit" class="btn-primary" style="width: 100%; justify-content: center;">Authenticate Session</button>
+      </form>
+    </div>
+
+    <!-- Main Admin Dashboard (revealed upon valid session) -->
+    <div id="dashboard-section" style="display: none;">
+
+      <!-- Account Profile Card -->
+      <div class="card">
+        <div class="card-header">
+          <h2 style="font-size: 16px;">Account Profile</h2>
+        </div>
+        <p class="card-subtitle">
+          Configure the display name and profile photo for a registered Signal account (<code style="color:#60a5fa">updateProfile</code>).
+        </p>
+        <form id="profile-form">
+          <div class="profile-grid">
+            <div>
+              <label for="profileAccountInput">Account (Phone or UUID) *</label>
+              <input type="text" id="profileAccountInput" list="known-accounts-list" placeholder="+15551234567 or UUID" required />
+              <datalist id="known-accounts-list"></datalist>
+            </div>
+            <div>
+              <label for="givenNameInput">First Name *</label>
+              <input type="text" id="givenNameInput" placeholder="First / Given Name" maxlength="64" required />
+            </div>
+            <div>
+              <label for="familyNameInput">Last Name (Optional)</label>
+              <input type="text" id="familyNameInput" placeholder="Last / Family Name (optional)" maxlength="64" />
+            </div>
+          </div>
+
+          <div class="avatar-row">
+            <div class="avatar-upload-group">
+              <img id="avatar-preview" class="avatar-preview" alt="Avatar preview" />
+              <div style="flex: 1;">
+                <label for="avatarInput">Profile Photo (Optional — PNG, JPEG, or GIF, max 3 MB, up to 1024×1024 px)</label>
+                <input type="file" id="avatarInput" accept="image/png,image/jpeg,image/gif" />
+              </div>
+              <button type="button" id="clear-avatar-btn" class="btn-secondary" style="display: none; padding: 6px 10px; font-size: 12px;">Clear Photo</button>
+            </div>
+            <button type="submit" id="save-profile-btn" class="btn-primary">Update Profile</button>
+          </div>
+          <div id="profile-status" class="status-banner"></div>
+        </form>
+      </div>
+
+      <!-- Generated Key Alert -->
+      <div id="new-key-alert">
+        <div style="font-weight: 600; color: var(--success); margin-bottom: 4px;">New API Key Generated!</div>
+        <div style="font-size: 13px; color: var(--text-muted);">
+          Make sure to copy this key now. For your security, you will not be able to view it in full again.
+        </div>
+        <div class="key-box">
+          <span id="created-key-text"></span>
+          <button type="button" id="copy-key-btn" class="btn-copy">Copy</button>
+        </div>
+      </div>
+
+      <!-- Create Key Card -->
+      <div class="card">
+        <h2 style="font-size: 16px; margin-bottom: 12px;">Create Scoped Service API Key</h2>
+        <form id="create-key-form" style="display: flex; flex-direction: column; gap: 12px;">
+          <div style="display: flex; gap: 12px; flex-wrap: wrap;">
+            <input type="text" id="serviceNameInput" placeholder="Service Name (e.g., IETF Moderator)" required style="flex: 1; min-width: 200px;" />
+            <input type="text" id="accountsInput" placeholder="Allowed Accounts (comma-separated, e.g. +15551234567 or UUID)" required style="flex: 1.5; min-width: 240px;" />
+            <input type="text" id="expiresDaysInput" placeholder="Expires in days (optional)" inputmode="numeric" style="width: 190px;" />
+          </div>
+          <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+            <div style="display: flex; align-items: center; gap: 16px; font-size: 13px; color: var(--text-muted);">
+              <span>Permissions:</span>
+              <label style="display: inline-flex; align-items: center; gap: 6px; margin: 0; color: var(--text); cursor: pointer;">
+                <input type="checkbox" id="permSend" value="send" checked /> send
+              </label>
+              <label style="display: inline-flex; align-items: center; gap: 6px; margin: 0; color: var(--text); cursor: pointer;">
+                <input type="checkbox" id="permReceive" value="receive" checked /> receive
+              </label>
+              <label style="display: inline-flex; align-items: center; gap: 6px; margin: 0; color: var(--text); cursor: pointer;">
+                <input type="checkbox" id="permAdmin" value="admin" /> admin
+              </label>
+            </div>
+            <button type="submit" class="btn-primary">Generate Key</button>
+          </div>
+        </form>
+      </div>
+
+      <!-- Keys Table Card -->
+      <div class="card">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+          <h2 style="font-size: 16px;">Active API Keys</h2>
+          <button type="button" id="refresh-keys-btn" class="btn-secondary" style="padding: 4px 10px; font-size: 12px;">Refresh</button>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Service Name</th>
+              <th>Token Prefix</th>
+              <th>Accounts</th>
+              <th>Permissions</th>
+              <th>Created At</th>
+              <th>Last Used</th>
+              <th style="text-align: right;">Action</th>
+            </tr>
+          </thead>
+          <tbody id="keys-table-body">
+            <!-- Dynamically populated -->
+          </tbody>
+        </table>
+        <div id="empty-state" class="empty-state" style="display: none;">
+          No service API keys created yet. Create one above to allow client services to access the Signal API.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/admin.js"></script>
+</body>
+</html>

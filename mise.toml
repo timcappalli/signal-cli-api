@@ -1,0 +1,56 @@
+[tools]
+go = "1.26"
+jq = "latest"
+
+[env]
+IMAGE_NAME = "signal-cli-api"
+DOCKER_HOST_REGISTRY = "ghcr.io/timcappalli"
+
+[tasks.build]
+description = "Build the signal-api binary"
+run = 'CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o signal-api main.go'
+
+[tasks.test]
+description = "Run unit tests with the race detector"
+run = "go test -v -race ./..."
+
+[tasks.vet]
+description = "Run go vet static analysis"
+run = "go vet ./..."
+
+[tasks.fmt]
+description = "Format Go source files"
+run = "gofmt -s -w ."
+
+[tasks.up]
+description = "Start the container via Docker Compose"
+run = "docker compose up -d"
+
+[tasks.down]
+description = "Stop the Docker Compose stack"
+run = "docker compose down"
+
+[tasks.logs]
+description = "Tail container logs"
+run = "docker compose logs -f"
+
+[tasks."db"]
+description = "Build docker image with a specific version"
+usage = """
+arg "[version]" default="latest" help="The docker image version tag"
+"""
+run = "docker buildx build --platform linux/amd64,linux/arm64 -t $IMAGE_NAME:{{ usage.version }} ."
+
+[tasks."db:release"]
+description = "Build, tag, and push docker images for version and latest"
+usage = """
+arg "[version]" default="latest" help="The docker image version tag"
+"""
+run = [
+    "docker buildx build --platform linux/amd64,linux/arm64 -t $IMAGE_NAME:{{ usage.version }} .",
+    "docker tag $IMAGE_NAME:{{ usage.version }} $IMAGE_NAME:latest",
+    "docker tag $IMAGE_NAME:{{ usage.version }} $DOCKER_HOST_REGISTRY/$IMAGE_NAME:{{ usage.version }}",
+    "docker tag $IMAGE_NAME:latest $DOCKER_HOST_REGISTRY/$IMAGE_NAME:latest",
+    "docker push $DOCKER_HOST_REGISTRY/$IMAGE_NAME:{{ usage.version }}",
+    "docker push $DOCKER_HOST_REGISTRY/$IMAGE_NAME:latest"
+]
