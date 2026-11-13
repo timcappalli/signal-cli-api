@@ -164,6 +164,21 @@
     <!-- Main Admin Dashboard (revealed upon valid session) -->
     <div id="dashboard-section" style="display: none;">
 
+      <!-- Registered Accounts Card -->
+      <div class="card">
+        <div class="card-header">
+          <h2 style="font-size: 16px;">Registered Accounts</h2>
+          <button type="button" id="refresh-accounts-btn" class="btn-secondary" style="padding: 4px 10px; font-size: 12px;">Refresh</button>
+        </div>
+        <p class="card-subtitle">
+          Signal accounts currently registered or linked in this container (<code style="color:#60a5fa">/v1/accounts</code>).
+        </p>
+        <div id="registered-accounts-list" style="display: flex; flex-wrap: wrap; gap: 8px;"></div>
+        <div id="accounts-empty-state" class="empty-state" style="display: none; padding: 14px;">
+          No registered accounts found yet. Register or link an account via terminal.
+        </div>
+      </div>
+
       <!-- Account Profile Card -->
       <div class="card">
         <div class="card-header">

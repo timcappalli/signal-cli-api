@@ -52,6 +52,11 @@ window.addEventListener("DOMContentLoaded", () => {
     refreshKeysBtn.addEventListener("click", loadKeys);
   }
 
+  const refreshAccountsBtn = document.getElementById("refresh-accounts-btn");
+  if (refreshAccountsBtn) {
+    refreshAccountsBtn.addEventListener("click", loadAccountsList);
+  }
+
   if (sessionToken && sessionExpiry && Date.now() < sessionExpiry) {
     startSessionTimer();
     showDashboard();
@@ -193,26 +198,107 @@ async function logout(callApi = true) {
 
 async function loadAccountsList() {
   const datalist = document.getElementById("known-accounts-list");
-  if (!datalist) return;
+  const listEl = document.getElementById("registered-accounts-list");
+  const emptyEl = document.getElementById("accounts-empty-state");
+  if (listEl) listEl.textContent = "";
+  if (emptyEl) emptyEl.style.display = "none";
+
   try {
     const res = await fetch("/v1/accounts", {
       headers: { "Authorization": "Bearer " + sessionToken }
     });
-    if (!res.ok) return;
+    if (res.status === 401) {
+      expireSession("Session expired. Please re-authenticate.");
+      return;
+    }
+    if (!res.ok) {
+      if (emptyEl) {
+        emptyEl.textContent = "Unable to load accounts (signal-cli daemon may still be starting).";
+        emptyEl.style.display = "block";
+      }
+      return;
+    }
+
     const accounts = await res.json();
-    datalist.textContent = "";
-    if (Array.isArray(accounts)) {
-      accounts.forEach(acc => {
+    if (datalist) datalist.textContent = "";
+
+    if (!Array.isArray(accounts) || accounts.length === 0) {
+      if (emptyEl) {
+        emptyEl.textContent = "No registered accounts found yet. Register or link an account via terminal.";
+        emptyEl.style.display = "block";
+      }
+      return;
+    }
+
+    accounts.forEach(acc => {
+      if (datalist) {
         const opt = document.createElement("option");
         opt.value = acc;
         datalist.appendChild(opt);
-      });
-      const profileAccInput = document.getElementById("profileAccountInput");
-      if (profileAccInput && !profileAccInput.value && accounts.length === 1) {
-        profileAccInput.value = accounts[0];
       }
+
+      if (listEl) {
+        const chip = document.createElement("div");
+        chip.style.display = "inline-flex";
+        chip.style.alignItems = "center";
+        chip.style.gap = "8px";
+        chip.style.background = "#090b10";
+        chip.style.border = "1px solid var(--border)";
+        chip.style.borderRadius = "6px";
+        chip.style.padding = "6px 10px";
+
+        const code = document.createElement("code");
+        code.style.fontSize = "13px";
+        code.style.color = "var(--text)";
+        code.textContent = acc;
+        chip.appendChild(code);
+
+        const useBtn = document.createElement("button");
+        useBtn.type = "button";
+        useBtn.className = "btn-secondary";
+        useBtn.style.padding = "3px 8px";
+        useBtn.style.fontSize = "11px";
+        useBtn.textContent = "Select";
+        useBtn.addEventListener("click", () => {
+          const profileAccInput = document.getElementById("profileAccountInput");
+          const keyAccInput = document.getElementById("accountsInput");
+          if (profileAccInput) profileAccInput.value = acc;
+          if (keyAccInput) keyAccInput.value = acc;
+        });
+        chip.appendChild(useBtn);
+
+        const copyBtn = document.createElement("button");
+        copyBtn.type = "button";
+        copyBtn.className = "btn-copy";
+        copyBtn.style.padding = "3px 8px";
+        copyBtn.style.fontSize = "11px";
+        copyBtn.textContent = "Copy";
+        copyBtn.addEventListener("click", () => {
+          navigator.clipboard.writeText(acc).then(() => {
+            copyBtn.textContent = "Copied!";
+            setTimeout(() => { copyBtn.textContent = "Copy"; }, 1500);
+          });
+        });
+        chip.appendChild(copyBtn);
+
+        listEl.appendChild(chip);
+      }
+    });
+
+    const profileAccInput = document.getElementById("profileAccountInput");
+    if (profileAccInput && !profileAccInput.value && accounts.length === 1) {
+      profileAccInput.value = accounts[0];
     }
-  } catch (_) {}
+    const keyAccInput = document.getElementById("accountsInput");
+    if (keyAccInput && !keyAccInput.value && accounts.length === 1) {
+      keyAccInput.value = accounts[0];
+    }
+  } catch (_) {
+    if (emptyEl) {
+      emptyEl.textContent = "Failed to fetch registered accounts.";
+      emptyEl.style.display = "block";
+    }
+  }
 }
 
 function handleAvatarSelected(e) {
