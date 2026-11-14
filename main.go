@@ -29,6 +29,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1362,7 +1363,158 @@ func (h *WSHub) Publish(account string, message []byte) {
 	}
 }
 
+// receiveFilter holds optional query-parameter filters for GET /v1/receive.
+type receiveFilter struct {
+	Limit          int
+	HasLimit       bool
+	Source         string
+	HasSource      bool
+	SourceNumber   string
+	HasSourceNum   bool
+	SourceUUID     string
+	HasSourceUUID  bool
+	SourceName     string
+	HasSourceName  bool
+	DataMessage    bool
+	HasDataMessage bool
+	Reaction       bool
+	HasReaction    bool
+}
+
+func parseNonEmptyQueryParam(q url.Values, name string) (string, bool, error) {
+	if !q.Has(name) {
+		return "", false, nil
+	}
+	v := strings.TrimSpace(q.Get(name))
+	if v == "" {
+		return "", false, fmt.Errorf("Invalid '%s' query parameter: must not be empty.", name)
+	}
+	return v, true, nil
+}
+
+func parseBoolQueryParam(q url.Values, name string) (bool, bool, error) {
+	if !q.Has(name) {
+		return false, false, nil
+	}
+	raw := strings.TrimSpace(strings.ToLower(q.Get(name)))
+	switch raw {
+	case "true":
+		return true, true, nil
+	case "false":
+		return false, true, nil
+	default:
+		return false, false, fmt.Errorf("Invalid '%s' query parameter: must be 'true' or 'false'.", name)
+	}
+}
+
+func parseReceiveFilter(q url.Values) (receiveFilter, error) {
+	var f receiveFilter
+	var err error
+
+	if q.Has("limit") {
+		raw := strings.TrimSpace(q.Get("limit"))
+		n, convErr := strconv.Atoi(raw)
+		if convErr != nil || n < 1 {
+			return receiveFilter{}, errors.New("Invalid 'limit' query parameter: must be a positive integer.")
+		}
+		f.Limit = n
+		f.HasLimit = true
+	}
+
+	if f.Source, f.HasSource, err = parseNonEmptyQueryParam(q, "source"); err != nil {
+		return receiveFilter{}, err
+	}
+	if f.SourceNumber, f.HasSourceNum, err = parseNonEmptyQueryParam(q, "sourceNumber"); err != nil {
+		return receiveFilter{}, err
+	}
+	if f.SourceUUID, f.HasSourceUUID, err = parseNonEmptyQueryParam(q, "sourceUuid"); err != nil {
+		return receiveFilter{}, err
+	}
+	if f.SourceName, f.HasSourceName, err = parseNonEmptyQueryParam(q, "sourceName"); err != nil {
+		return receiveFilter{}, err
+	}
+	if f.DataMessage, f.HasDataMessage, err = parseBoolQueryParam(q, "dataMessage"); err != nil {
+		return receiveFilter{}, err
+	}
+	if f.Reaction, f.HasReaction, err = parseBoolQueryParam(q, "reaction"); err != nil {
+		return receiveFilter{}, err
+	}
+
+	return f, nil
+}
+
+func hasNonNullJSON(raw json.RawMessage) bool {
+	trimmed := bytes.TrimSpace(raw)
+	return len(trimmed) > 0 && !bytes.Equal(trimmed, []byte("null"))
+}
+
+func (f receiveFilter) matches(raw []byte) bool {
+	if !f.HasSource && !f.HasSourceNum && !f.HasSourceUUID && !f.HasSourceName && !f.HasDataMessage && !f.HasReaction {
+		return true
+	}
+
+	type receiveEnvelope struct {
+		Source       string `json:"source"`
+		SourceNumber string `json:"sourceNumber"`
+		SourceUUID   string `json:"sourceUuid"`
+		SourceName   string `json:"sourceName"`
+		DataMessage  *struct {
+			Reaction json.RawMessage `json:"reaction"`
+		} `json:"dataMessage"`
+		Reaction json.RawMessage `json:"reaction"`
+	}
+
+	var msg struct {
+		Params struct {
+			Envelope *receiveEnvelope `json:"envelope"`
+		} `json:"params"`
+		Envelope *receiveEnvelope `json:"envelope"`
+	}
+	if err := json.Unmarshal(raw, &msg); err != nil {
+		return false
+	}
+
+	env := msg.Params.Envelope
+	if env == nil {
+		env = msg.Envelope
+	}
+	if env == nil {
+		return false
+	}
+
+	if f.HasSource && env.Source != f.Source {
+		return false
+	}
+	if f.HasSourceNum && env.SourceNumber != f.SourceNumber {
+		return false
+	}
+	if f.HasSourceUUID && !strings.EqualFold(env.SourceUUID, f.SourceUUID) {
+		return false
+	}
+	if f.HasSourceName && env.SourceName != f.SourceName {
+		return false
+	}
+	if f.HasDataMessage {
+		hasDM := env.DataMessage != nil
+		if hasDM != f.DataMessage {
+			return false
+		}
+	}
+	if f.HasReaction {
+		hasReact := (env.DataMessage != nil && hasNonNullJSON(env.DataMessage.Reaction)) || hasNonNullJSON(env.Reaction)
+		if hasReact != f.Reaction {
+			return false
+		}
+	}
+
+	return true
+}
+
 func (h *WSHub) GetHistory(account string, since time.Time) []json.RawMessage {
+	return h.GetFilteredHistory(account, since, receiveFilter{})
+}
+
+func (h *WSHub) GetFilteredHistory(account string, since time.Time, filter receiveFilter) []json.RawMessage {
 	if account == "" {
 		return []json.RawMessage{}
 	}
@@ -1375,7 +1527,13 @@ func (h *WSHub) GetHistory(account string, since time.Time) []json.RawMessage {
 		if !since.IsZero() && entry.ReceivedAt.Before(since) {
 			continue
 		}
+		if !filter.matches(entry.Data) {
+			continue
+		}
 		items = append(items, json.RawMessage(entry.Data))
+	}
+	if filter.HasLimit && len(items) > filter.Limit {
+		items = items[len(items)-filter.Limit:]
 	}
 	return items
 }
@@ -3255,8 +3413,13 @@ func (s *Server) handleReceive(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if r.Method == http.MethodGet {
+		filter, err := parseReceiveFilter(r.URL.Query())
+		if err != nil {
+			writeJSONError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
-		items := s.hub.GetHistory(account, principal.CreatedAt)
+		items := s.hub.GetFilteredHistory(account, principal.CreatedAt, filter)
 		json.NewEncoder(w).Encode(items)
 		return
 	}

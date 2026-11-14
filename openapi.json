@@ -464,11 +464,65 @@
     "/v1/receive": {
       "get": {
         "summary": "Receive Messages (Default Account — HTTP & WebSocket)",
-        "description": "Retrieves recent messages or upgrades to a real-time WebSocket stream (`ws(s)://<host>/v1/receive`) for the single resolved account (when the API key is scoped to one account or only one account is registered).",
+        "description": "Retrieves recent messages or upgrades to a real-time WebSocket stream (`ws(s)://<host>/v1/receive`) for the single resolved account (when the API key is scoped to one account or only one account is registered). Supports optional query-parameter filtering and limiting on HTTP GET.",
         "operationId": "receiveMessagesDefaultAccount",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Maximum number of most recent matching messages to return (positive integer)",
+            "schema": { "type": "integer", "minimum": 1 }
+          },
+          {
+            "name": "source",
+            "in": "query",
+            "required": false,
+            "description": "Filter by exact envelope `source` (ANDed with other filters)",
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "sourceNumber",
+            "in": "query",
+            "required": false,
+            "description": "Filter by exact envelope `sourceNumber` (ANDed with other filters)",
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "sourceUuid",
+            "in": "query",
+            "required": false,
+            "description": "Filter by envelope `sourceUuid` (case-insensitive, ANDed with other filters)",
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "sourceName",
+            "in": "query",
+            "required": false,
+            "description": "Filter by exact envelope `sourceName` (ANDed with other filters)",
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "dataMessage",
+            "in": "query",
+            "required": false,
+            "description": "Filter by presence (`true`) or absence (`false`) of `envelope.dataMessage` (ANDed with other filters)",
+            "schema": { "type": "boolean" }
+          },
+          {
+            "name": "reaction",
+            "in": "query",
+            "required": false,
+            "description": "Filter by presence (`true`) or absence (`false`) of a reaction in `envelope.dataMessage.reaction` (ANDed with other filters)",
+            "schema": { "type": "boolean" }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Array of message envelopes"
+          },
+          "400": {
+            "description": "Invalid query parameter or account"
           },
           "101": {
             "description": "Switching Protocols (WebSocket real-time receive stream)"
@@ -479,7 +533,7 @@
     "/v1/receive/{number}": {
       "get": {
         "summary": "Receive Messages (HTTP & WebSocket)",
-        "description": "Retrieves recent messages for the account over HTTP GET, or upgrades to a real-time WebSocket stream at `ws(s)://<host>/v1/receive/{number}`.",
+        "description": "Retrieves recent messages for the account over HTTP GET, or upgrades to a real-time WebSocket stream at `ws(s)://<host>/v1/receive/{number}`. Supports optional query-parameter filtering and limiting on HTTP GET.",
         "operationId": "receiveMessages",
         "parameters": [
           {
@@ -490,6 +544,55 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Maximum number of most recent matching messages to return (positive integer)",
+            "schema": { "type": "integer", "minimum": 1 }
+          },
+          {
+            "name": "source",
+            "in": "query",
+            "required": false,
+            "description": "Filter by exact envelope `source` (ANDed with other filters)",
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "sourceNumber",
+            "in": "query",
+            "required": false,
+            "description": "Filter by exact envelope `sourceNumber` (ANDed with other filters)",
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "sourceUuid",
+            "in": "query",
+            "required": false,
+            "description": "Filter by envelope `sourceUuid` (case-insensitive, ANDed with other filters)",
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "sourceName",
+            "in": "query",
+            "required": false,
+            "description": "Filter by exact envelope `sourceName` (ANDed with other filters)",
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "dataMessage",
+            "in": "query",
+            "required": false,
+            "description": "Filter by presence (`true`) or absence (`false`) of `envelope.dataMessage` (ANDed with other filters)",
+            "schema": { "type": "boolean" }
+          },
+          {
+            "name": "reaction",
+            "in": "query",
+            "required": false,
+            "description": "Filter by presence (`true`) or absence (`false`) of a reaction in `envelope.dataMessage.reaction` (ANDed with other filters)",
+            "schema": { "type": "boolean" }
           }
         ],
         "responses": {
