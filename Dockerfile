@@ -65,4 +65,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
 ENTRYPOINT ["/app/signal-api"]
 
 LABEL org.opencontainers.image.source="https://github.com/timcappalli/signal-cli-api"
-LABEL org.opencontainers.image.version="1.2.1"
+LABEL org.opencontainers.image.version="1.3.0"
