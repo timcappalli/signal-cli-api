@@ -8,7 +8,7 @@ WORKDIR /src
 ARG VERSION=dev
 
 COPY go.mod ./
-COPY main.go keystore_test.go admin.html admin.js docs.html docs.js openapi.json ./
+COPY main.go keystore_test.go admin.html admin.js docs.html docs.js test.html test.js openapi.json ./
 
 RUN CGO_ENABLED=0 go test -v ./... && \
     CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w -X main.appVersion=${VERSION}" -o /bin/signal-api main.go
@@ -42,6 +42,8 @@ COPY --chown=10001:10001 docs.html /app/docs.html
 COPY --chown=10001:10001 docs.js /app/docs.js
 COPY --chown=10001:10001 admin.html /app/admin.html
 COPY --chown=10001:10001 admin.js /app/admin.js
+COPY --chown=10001:10001 test.html /app/test.html
+COPY --chown=10001:10001 test.js /app/test.js
 
 ARG VERSION=dev
 ENV PORT=8080 \

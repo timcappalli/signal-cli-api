@@ -1982,6 +1982,38 @@ func TestRateLimitErrorSurfacingAndChallengeSubmission(t *testing.T) {
 	}
 }
 
+func TestTestUIEndpoints(t *testing.T) {
+	srv := &Server{}
+	handler := srv.Handler()
+
+	pageReq := httptest.NewRequest(http.MethodGet, "http://localhost:8080/test", nil)
+	pageRec := httptest.NewRecorder()
+	handler.ServeHTTP(pageRec, pageReq)
+	if pageRec.Code != http.StatusOK {
+		t.Fatalf("Expected GET /test to return 200, got %d", pageRec.Code)
+	}
+	if ct := pageRec.Header().Get("Content-Type"); !strings.Contains(ct, "text/html") {
+		t.Errorf("Expected text/html Content-Type for /test, got %q", ct)
+	}
+	if cc := pageRec.Header().Get("Cache-Control"); cc != "no-store" {
+		t.Errorf("Expected Cache-Control: no-store for /test, got %q", cc)
+	}
+	if !strings.Contains(pageRec.Body.String(), "Test Chat") {
+		t.Errorf("Expected /test body to contain Test Chat UI")
+	}
+
+	jsReq := httptest.NewRequest(http.MethodGet, "http://localhost:8080/test.js", nil)
+	jsRec := httptest.NewRecorder()
+	handler.ServeHTTP(jsRec, jsReq)
+	if jsRec.Code != http.StatusOK {
+		t.Fatalf("Expected GET /test.js to return 200, got %d", jsRec.Code)
+	}
+	if ct := jsRec.Header().Get("Content-Type"); !strings.Contains(ct, "javascript") {
+		t.Errorf("Expected javascript Content-Type for /test.js, got %q", ct)
+	}
+}
+
+
 
 
 

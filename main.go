@@ -2720,7 +2720,7 @@ func (s *Server) securityMiddleware(next http.Handler) http.Handler {
 		if r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
 			w.Header().Set("Strict-Transport-Security", "max-age=63072000; includeSubDomains")
 		}
-		if strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/v1/") || strings.HasPrefix(r.URL.Path, "/v2/") || r.URL.Path == "/admin" || r.URL.Path == "/keys" {
+		if strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/v1/") || strings.HasPrefix(r.URL.Path, "/v2/") || r.URL.Path == "/admin" || r.URL.Path == "/keys" || r.URL.Path == "/test" {
 			w.Header().Set("Cache-Control", "no-store")
 		}
 
@@ -2763,6 +2763,7 @@ func (s *Server) clientAuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		// Publicly exempt paths
 		if path == "/v1/health" || path == "/openapi.json" || path == "/swagger.json" ||
 			path == "/docs" || path == "/docs.js" || path == "/swagger" ||
+			path == "/test" || path == "/test.js" ||
 			path == "/admin" || path == "/admin.js" || path == "/keys" || path == "/keys.js" || path == "/admin/keys" {
 			next(w, r)
 			return
@@ -3701,6 +3702,16 @@ func (s *Server) Handler() http.Handler {
 	})
 	mux.HandleFunc("/swagger", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/docs", http.StatusMovedPermanently)
+	})
+
+	// Test Messaging UI (/test)
+	mux.HandleFunc("/test", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		http.ServeFile(w, r, "test.html")
+	})
+	mux.HandleFunc("/test.js", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+		http.ServeFile(w, r, "test.js")
 	})
 
 	// Admin UI (/admin) & backwards-compatible /keys redirects
